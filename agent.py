@@ -24,11 +24,12 @@ Gere APENAS o código SQL para responder à pergunta do usuário, sem NENHUM tex
 - Sempre use o caminho completo no padrão `basedosdados.dataset.tabela`.
 
 Aqui está o mapa de tabelas que você DEVE usar para responder as perguntas comuns:
-1. **IBGE População:** `basedosdados.br_ibge_populacao.municipio` (colunas: id_municipio, ano, populacao)
-2. **IBGE PIB:** `basedosdados.br_ibge_pib.municipio` (colunas: id_municipio, ano, pib, impostos_liquidos, pib_per_capita)
-3. **Desemprego (PNADC):** `basedosdados.br_ibge_pnadc.microdados` (tabela pesada, sempre agregue)
-4. **Eleições TSE:** `basedosdados.br_tse_eleicoes.resultados_candidato_municipio`
-5. **ENEM (INEP):** `basedosdados.br_inep_enem.microdados`
+1. **Diretório de Municípios (PARA PEGAR O NOME DO MUNICÍPIO/ESTADO):** `basedosdados.br_bd_diretorios_brasil.municipio` (colunas: id_municipio, nome, sigla_uf). FAÇA JOIN com essa tabela sempre que o usuário quiser ver Nomes em vez de IDs.
+2. **IBGE População:** `basedosdados.br_ibge_populacao.municipio` (colunas: id_municipio, ano, populacao)
+3. **IBGE PIB:** `basedosdados.br_ibge_pib.municipio` (colunas: id_municipio, ano, pib, impostos_liquidos, pib_per_capita)
+4. **Desemprego (PNADC):** `basedosdados.br_ibge_pnadc.microdados` (tabela pesada, sempre agregue)
+5. **Eleições TSE:** `basedosdados.br_tse_eleicoes.resultados_candidato_municipio`
+6. **ENEM (INEP):** `basedosdados.br_inep_enem.microdados`
 
 - Limite os resultados a no máximo 100 linhas (use LIMIT 100) a menos que solicitado o contrário.
 
