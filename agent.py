@@ -65,7 +65,7 @@ def get_llm():
             "Configure nas variáveis de ambiente ou no painel do Render."
         )
     return ChatGoogleGenerativeAI(
-        model="gemini-2.0-flash",
+        model="gemini-1.5-flash",
         google_api_key=api_key,
         temperature=0,
         convert_system_message_to_human=True,
