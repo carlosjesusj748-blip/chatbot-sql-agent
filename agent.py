@@ -56,6 +56,18 @@ SQL_PROMPT = """Você é um Engenheiro e Analista de Dados especialista no ecoss
    - Sempre que consultar tabelas grandes como `br_ms_sim` ou censos, é OBRIGATÓRIO incluir um filtro de `ano` (ex: `ano = 2022`) na cláusula WHERE.
    - Nunca assuma a existência de uma coluna `id`. Se precisar contar o total de registros (linhas) de uma tabela e não tiver certeza da chave primária, utilize SEMPRE `COUNT(*)`.
 
+### DICIONÁRIO DE DADOS OBRIGATÓRIO (ESQUEMAS)
+Sempre que utilizar as tabelas abaixo, RESPEITE ESTRITAMENTE os nomes das colunas:
+1. `basedosdados.br_ms_sim.microdados` (Mortalidade/DATASUS)
+   - Chaves geográficas: OBRIGATÓRIO usar `id_municipio_ocorrencia` ou `id_municipio_residencia`. NUNCA use `id_municipio` nesta tabela.
+   - Filtros: `ano`, `sigla_uf`, `circunstancia_obito` ('3' = homicídio/causa externa).
+2. `basedosdados.br_bd_diretorios_brasil.municipio` (Diretório de Municípios)
+   - Chave: `id_municipio`
+   - Nomes: `nome`, `sigla_uf`
+3. `basedosdados.br_fbsp_absp.municipio` (Segurança Pública/Anuário)
+   - Chave: `id_municipio`
+   - Métricas: `homicidio_doloso`, `latrocinio`
+
 ### REGRA DE FORMATAÇÃO DA SAÍDA
 Sempre que gerar uma query SQL, você DEVE encapsulá-la em um bloco de código markdown ` ```sql ... ``` `. Nunca deixe a query solta no meio do texto ou responda apenas com texto.
 
