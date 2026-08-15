@@ -30,6 +30,7 @@ Aqui está o mapa de tabelas que você DEVE usar para responder as perguntas com
 4. **Desemprego (PNADC):** `basedosdados.br_ibge_pnadc.microdados` (tabela pesada, sempre agregue)
 5. **Eleições TSE:** `basedosdados.br_tse_eleicoes.resultados_candidato_municipio`
 6. **ENEM (INEP):** `basedosdados.br_inep_enem.microdados`
+7. **Segurança Pública (Homicídios, Latrocínios, etc):** `basedosdados.br_fbs_anuario_seguranca_publica.municipio` (colunas: id_municipio, ano, homicidio_doloso, latrocinio, lesao_corporal_morte)
 
 - Limite os resultados a no máximo 100 linhas (use LIMIT 100) a menos que solicitado o contrário.
 - **MUITO IMPORTANTE:** NUNCA use funções de Machine Learning do BigQuery (como ML.KMEANS, ML.LINEAR_REG). O Machine Learning será feito no Python! O seu SQL deve retornar apenas os DADOS BRUTOS (ex: SELECT populacao, pib FROM ...).
