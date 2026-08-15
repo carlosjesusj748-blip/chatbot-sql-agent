@@ -17,19 +17,22 @@ from langchain_core.output_parsers import StrOutputParser
 PROJECT_ID = "alert-palace-504123-t8"
 
 ROUTER_PROMPT = """Você é um assistente de roteamento.
-Classifique a pergunta do usuário em APENAS UM dos seguintes temas: economia, educacao, seguranca ou geral.
+Classifique a pergunta do usuário em APENAS UM dos seguintes temas: economia, educacao, saude, trabalho, seguranca, geografia ou geral.
 Responda APENAS com o nome do tema, sem pontuação ou explicação.
 Pergunta: {question}
 Tema:"""
 
 TABLE_SCHEMAS_MAP = {
-    "economia": "1. IBGE PIB: `basedosdados.br_ibge_pib.municipio` (colunas: id_municipio, ano, pib, impostos_liquidos, pib_per_capita)\n2. Desemprego (PNADC): `basedosdados.br_ibge_pnadc.microdados`",
-    "educacao": "1. ENEM (INEP): `basedosdados.br_inep_enem.microdados`",
-    "seguranca": "1. Segurança Pública (Homicídios, Latrocínios, etc): `basedosdados.br_fbsp_absp.municipio` (colunas: id_municipio, ano, homicidio_doloso, latrocinio, lesao_corporal_morte)",
-    "geral": "1. IBGE População: `basedosdados.br_ibge_populacao.municipio` (colunas: id_municipio, ano, populacao)\n2. Eleições TSE: `basedosdados.br_tse_eleicoes.resultados_candidato_municipio`"
+    "economia": "1. IBGE PIB: `basedosdados.br_ibge_pib.municipio`\n2. IBGE IPCA: `basedosdados.br_ibge_ipca.mes_brasil`",
+    "educacao": "1. INEP Censo Escolar: `basedosdados.br_inep_censo_escolar.escola`",
+    "saude": "1. SIM DataSUS (Mortalidade): `basedosdados.br_ms_datasus.sim`",
+    "trabalho": "1. Novo CAGED: `basedosdados.br_me_caged.microdados_movimentacao`\n2. RAIS: `basedosdados.br_me_rais.microdados_vinculos`",
+    "seguranca": "1. ABSP Município: `basedosdados.br_fbsp_absp.municipio`\n2. ABSP UF: `basedosdados.br_fbsp_absp.uf`\n3. Ocorrências SP: `basedosdados.br_sp_gov_ssp.ocorrencias_registradas`",
+    "geografia": "1. Municípios: `basedosdados.br_bd_diretorios_brasil.municipio`\n2. UF: `basedosdados.br_bd_diretorios_brasil.uf`\n3. Setor Censitário: `basedosdados.br_bd_diretorios_brasil.setor_censitario`",
+    "geral": "1. IBGE População: `basedosdados.br_ibge_populacao.municipio`\n2. Eleições TSE: `basedosdados.br_tse_eleicoes.resultados_candidato_municipio`"
 }
 
-BASE_TABLE = "0. Diretório de Municípios (Obrigatório para Nomes): `basedosdados.br_bd_diretorios_brasil.municipio` (colunas: id_municipio, nome, sigla_uf). FAÇA JOIN com essa tabela sempre que precisar do Nome."
+BASE_TABLE = "0. Diretório de Municípios: `basedosdados.br_bd_diretorios_brasil.municipio` (colunas: id_municipio, nome, sigla_uf). Diretório de UFs: `basedosdados.br_bd_diretorios_brasil.uf`. FAÇA JOIN com diretórios sempre que precisar dos nomes em texto em vez de IDs."
 
 SQL_PROMPT = """Você é um analista de dados especialista em Google BigQuery.
 Gere APENAS o código SQL para responder à pergunta do usuário, sem NENHUM texto adicional, sem formatação markdown e sem crases (```). Apenas o SELECT válido.
