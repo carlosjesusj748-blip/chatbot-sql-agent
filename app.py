@@ -206,9 +206,9 @@ def render_message(msg_content):
             # 1. Análise
             st.markdown(msg_content.get("analysis", ""))
             
-            # 2. Código SQL (Oculto)
-            with st.expander("💻 Ver Código SQL"):
-                st.code(msg_content.get("sql", ""), language="sql")
+            # 2. Código SQL (Visível)
+            st.markdown("### 💻 Código SQL Gerado")
+            st.code(msg_content.get("sql", ""), language="sql")
             
             # 3. Tabela de Dados Interativa
             st.markdown("### 🗂️ Dados Extraídos")
