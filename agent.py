@@ -66,7 +66,7 @@ def get_llm():
             "Configure nas variáveis de ambiente ou no painel."
         )
     return ChatGroq(
-        model="llama3-70b-8192",
+        model="llama-3.1-70b-versatile",
         api_key=api_key,
         temperature=0,
     )
