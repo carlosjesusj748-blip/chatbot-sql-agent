@@ -25,7 +25,7 @@ Tema:"""
 TABLE_SCHEMAS_MAP = {
     "economia": "1. IBGE PIB: `basedosdados.br_ibge_pib.municipio` (colunas: id_municipio, ano, pib, impostos_liquidos, pib_per_capita)\n2. Desemprego (PNADC): `basedosdados.br_ibge_pnadc.microdados`",
     "educacao": "1. ENEM (INEP): `basedosdados.br_inep_enem.microdados`",
-    "seguranca": "1. Segurança Pública (Homicídios, Latrocínios, etc): `basedosdados.br_fbsp_anuario_seguranca_publica.municipio` (colunas: id_municipio, ano, homicidio_doloso, latrocinio, lesao_corporal_morte)",
+    "seguranca": "1. Segurança Pública (Homicídios, Latrocínios, etc): `basedosdados.br_fbsp_absp.municipio` (colunas: id_municipio, ano, homicidio_doloso, latrocinio, lesao_corporal_morte)",
     "geral": "1. IBGE População: `basedosdados.br_ibge_populacao.municipio` (colunas: id_municipio, ano, populacao)\n2. Eleições TSE: `basedosdados.br_tse_eleicoes.resultados_candidato_municipio`"
 }
 
