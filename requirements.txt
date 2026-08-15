@@ -10,3 +10,4 @@ db-dtypes
 tabulate
 scikit-learn
 seaborn
+google-cloud-bigquery

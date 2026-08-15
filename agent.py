@@ -13,6 +13,8 @@ from sqlalchemy import create_engine
 from langchain_groq import ChatGroq
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
+from google.cloud import bigquery
+from google.api_core.exceptions import BadRequest
 
 PROJECT_ID = "alert-palace-504123-t8"
 
@@ -34,28 +36,28 @@ TABLE_SCHEMAS_MAP = {
 
 BASE_TABLE = "0. Diretório de Municípios: `basedosdados.br_bd_diretorios_brasil.municipio` (colunas: id_municipio, nome, sigla_uf). Diretório de UFs: `basedosdados.br_bd_diretorios_brasil.uf`. FAÇA JOIN com diretórios sempre que precisar dos nomes em texto em vez de IDs."
 
-SQL_PROMPT = """Você é um analista de dados especialista em Google BigQuery.
-Gere APENAS o código SQL para responder à pergunta do usuário, sem NENHUM texto adicional, sem formatação markdown e sem crases (```). Apenas o SELECT válido.
+SQL_PROMPT = """Você é um Engenheiro e Analista de Dados especialista no ecossistema do BigQuery da "Base dos Dados".
 
-### DIRETRIZES TÉCNICAS
-- ATENÇÃO: Os dados reais estão no projeto público `basedosdados`. 
-- Sempre use o caminho completo no padrão `basedosdados.dataset.tabela`.
-- OBRIGATÓRIO: Você DEVE envolver o nome completo da tabela com crases (backticks) no FROM e JOIN. Exemplo: \`basedosdados.dataset.tabela\`
-
-### REGRAS DE ESQUEMA E DIRETÓRIOS
-- A tabela `basedosdados.br_bd_diretorios_brasil.municipio` já possui `sigla_uf` e `nome`. Não faça JOIN desnecessário com a tabela `uf` para obter o estado.
-- Na tabela `basedosdados.br_bd_diretorios_brasil.uf`, o campo da sigla é `sigla` (não `sigla_uf`).
-- A tabela `br_sp_gov_ssp.ocorrencias_registradas` é restrita exclusivamente ao estado de São Paulo ('SP'). Para análises nacionais ou de outros estados (como 'BA'), utilize `br_ms_datasus.sim` ou `br_fbsp_absp`.
-
+### REGRAS CRÍTICAS DE SCHEMA E ESCOPO
+1. ESCOPO GEOGRÁFICO:
+   - Tabelas iniciadas por `br_sp_*` atendem EXCLUSIVAMENTE ao Estado de São Paulo.
+   - Para analisar homicídios, mortalidade ou violência na Bahia ('BA'), em outros estados ou no Brasil como um todo, consulte SEMPRE:
+     * `basedosdados.br_ms_sim.microdados` (Causa externa/homicídio: `circunstancia_obito = '3'`)
+     * `basedosdados.br_fbsp_absp.municipio`
+2. PADRÕES DE DIRETÓRIO:
+   - Para enriquecer códigos de municípios (`id_municipio`) com nome e estado, use `basedosdados.br_bd_diretorios_brasil.municipio`.
+   - Na tabela `br_bd_diretorios_brasil.municipio`, use os campos `id_municipio`, `nome` e `sigla_uf`.
+   - Na tabela `br_bd_diretorios_brasil.uf`, o campo de identificação do estado é `sigla` (e não `sigla_uf`).
+3. SINTAXE SQL:
+   - Escreva sempre em padrão Google BigQuery (Standard SQL), envolvendo os caminhos das tabelas entre crases (`basedosdados.dataset.tabela`).
+   - Evite `SELECT *`; selecione apenas as colunas necessárias e aplique `LIMIT` apropriado se não houver agregação.
+   - NUNCA use funções de Machine Learning do BigQuery (como ML.KMEANS).
 
 Aqui está o mapa de tabelas que você DEVE usar para responder a pergunta:
 {tabelas_contexto}
 
-- Limite os resultados a no máximo 100 linhas (use LIMIT 100) a menos que solicitado o contrário.
-- **MUITO IMPORTANTE:** NUNCA use funções de Machine Learning do BigQuery (como ML.KMEANS, ML.LINEAR_REG). O Machine Learning será feito no Python! O seu SQL deve retornar apenas os DADOS BRUTOS (ex: SELECT populacao, pib FROM ...).
-- **SINTAXE SQL:** No BigQuery, use sempre `=` para igualdade, NUNCA `==`. Exemplo correto: `WHERE sigla_uf = 'SP'`.
-
 Pergunta do usuário: {question}
+{contexto_erro}
 SQL:
 """
 
@@ -139,6 +141,23 @@ def get_engine():
     db_uri = f"bigquery://{PROJECT_ID}"
     return create_engine(db_uri)
 
+def validar_query_bigquery(query_sql):
+    """
+    Valida a sintaxe e o schema da query usando o Dry Run do BigQuery.
+    Retorna (True, "Mensagem de sucesso/bytes") ou (False, "Mensagem de erro").
+    """
+    client = bigquery.Client(project=PROJECT_ID)
+    job_config = bigquery.QueryJobConfig(dry_run=True, use_query_cache=False)
+    
+    try:
+        query_job = client.query(query_sql, job_config=job_config)
+        bytes_processados = query_job.total_bytes_processed
+        mb_processados = bytes_processados / (1024 * 1024)
+        return True, f"Query válida! Processaria {mb_processados:.2f} MB."
+    except BadRequest as e:
+        return False, e.message
+
+
 
 def ask(question: str) -> dict:
     """
@@ -163,14 +182,32 @@ def ask(question: str) -> dict:
             
         tabelas_contexto = BASE_TABLE + "\n" + TABLE_SCHEMAS_MAP[tema]
         
-        # 1. Geração SQL
-        prompt_sql = ChatPromptTemplate.from_template(SQL_PROMPT)
-        chain_sql = prompt_sql | llm | StrOutputParser()
-        sql_query = chain_sql.invoke({
-            "question": question,
-            "tabelas_contexto": tabelas_contexto
-        })
-        sql_query = sql_query.replace("```sql", "").replace("```", "").strip()
+        # 1. Geração SQL com Loop de Validação
+        max_tentativas = 3
+        sql_query = ""
+        erro_anterior = ""
+        sucesso = False
+        
+        for tentativa in range(max_tentativas):
+            contexto_erro = f"\nSua tentativa anterior falhou com este erro: {erro_anterior}\nPor favor, reescreva a query corrigindo o problema usando apenas as colunas do schema fornecido e evite o erro." if erro_anterior else ""
+            
+            prompt_sql = ChatPromptTemplate.from_template(SQL_PROMPT)
+            chain_sql = prompt_sql | llm | StrOutputParser()
+            sql_query = chain_sql.invoke({
+                "question": question,
+                "tabelas_contexto": tabelas_contexto,
+                "contexto_erro": contexto_erro
+            })
+            sql_query = sql_query.replace("```sql", "").replace("```", "").strip()
+            
+            sucesso, msg = validar_query_bigquery(sql_query)
+            if sucesso:
+                break
+            else:
+                erro_anterior = msg
+                
+        if not sucesso:
+            return {"error": f"**Falha ao gerar SQL válido após {max_tentativas} tentativas.**\nÚltimo erro: {erro_anterior}\n\n**Última Query Gerada:**\n```sql\n{sql_query}\n```"}
         
         # 2. Execução
         try:
