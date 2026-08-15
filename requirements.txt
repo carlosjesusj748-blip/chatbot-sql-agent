@@ -8,3 +8,5 @@ sqlalchemy-bigquery
 pandas
 db-dtypes
 tabulate
+scikit-learn
+seaborn

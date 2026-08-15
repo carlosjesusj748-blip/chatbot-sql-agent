@@ -223,17 +223,70 @@ def render_message(msg_content):
                 mime="text/csv",
             )
             
-            # 4. Gráfico (se aplicável)
-            chart = msg_content.get("chart_config", {})
-            chart_type = chart.get("type", "none")
-            if chart_type in ["bar", "line"]:
+            # 4. Machine Learning & Gráfico
+            ml = msg_content.get("ml_config", {})
+            ml_task = ml.get("ml_task", "none")
+            chart_type = ml.get("chart_type", "none")
+            x_col = ml.get("x_col")
+            y_col = ml.get("y_col")
+            
+            if ml_task != "none":
+                st.markdown(f"### 🧠 Análise Avançada ({ml_task.capitalize()})")
+                st.caption(ml.get("reason", ""))
+                
+                try:
+                    if ml_task == "summary":
+                        st.write("Estatística Descritiva:")
+                        st.dataframe(df.describe())
+                        
+                    elif ml_task == "correlation":
+                        st.write("Matriz de Correlação:")
+                        numeric_df = df.select_dtypes(include='number')
+                        if not numeric_df.empty:
+                            corr = numeric_df.corr()
+                            st.dataframe(corr.style.background_gradient(cmap='coolwarm'))
+                        else:
+                            st.warning("Não há colunas numéricas suficientes para correlação.")
+                            
+                    elif ml_task == "kmeans" and x_col and y_col:
+                        from sklearn.cluster import KMeans
+                        # Remover nulos para o modelo
+                        df_clean = df.dropna(subset=[x_col, y_col]).copy()
+                        if len(df_clean) > 0:
+                            k = int(ml.get("k", 3))
+                            kmeans = KMeans(n_clusters=k, random_state=42, n_init=10)
+                            df_clean['cluster'] = kmeans.fit_predict(df_clean[[x_col, y_col]])
+                            st.write(f"Agrupamento K-Means (K={k})")
+                            st.scatter_chart(df_clean, x=x_col, y=y_col, color='cluster')
+                            
+                    elif ml_task == "regression" and x_col and y_col:
+                        import numpy as np
+                        import pandas as pd
+                        df_clean = df.dropna(subset=[x_col, y_col]).copy()
+                        if len(df_clean) > 1:
+                            x = df_clean[x_col].values
+                            y = df_clean[y_col].values
+                            # Regressão linear simples (grau 1)
+                            z = np.polyfit(x, y, 1)
+                            p = np.poly1d(z)
+                            df_clean['tendencia'] = p(x)
+                            
+                            st.write(f"Regressão Linear: {y_col} = {z[0]:.4f} * {x_col} + {z[1]:.4f}")
+                            # Mostrar gráfico de linha com a tendência
+                            st.line_chart(df_clean.set_index(x_col)[[y_col, 'tendencia']])
+                            
+                except Exception as e:
+                    st.warning(f"Erro ao executar o modelo {ml_task}: {str(e)}")
+
+            # Gráficos simples se não houver scatter de ML
+            elif chart_type in ["bar", "line"]:
                 st.markdown(f"### 📊 Visualização Gráfica")
-                st.caption(chart.get("reason", ""))
+                st.caption(ml.get("reason", ""))
                 try:
                     if chart_type == "bar":
-                        st.bar_chart(df, x=chart.get("x_col"), y=chart.get("y_col"))
+                        st.bar_chart(df, x=x_col, y=y_col)
                     elif chart_type == "line":
-                        st.line_chart(df, x=chart.get("x_col"), y=chart.get("y_col"))
+                        st.line_chart(df, x=x_col, y=y_col)
                 except Exception as e:
                     st.warning(f"Não foi possível desenhar o gráfico: {e}")
 

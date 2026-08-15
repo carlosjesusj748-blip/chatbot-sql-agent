@@ -28,8 +28,9 @@ Aqui está o mapa de tabelas que você DEVE usar para responder as perguntas com
 2. **IBGE População:** `basedosdados.br_ibge_populacao.municipio` (colunas: id_municipio, ano, populacao)
 3. **IBGE PIB:** `basedosdados.br_ibge_pib.municipio` (colunas: id_municipio, ano, pib, impostos_liquidos, pib_per_capita)
 4. **Desemprego (PNADC):** `basedosdados.br_ibge_pnadc.microdados` (tabela pesada, sempre agregue)
-5. **Eleições TSE:** `basedosdados.br_tse_eleicoes.resultados_candidato_municipio`
-6. **ENEM (INEP):** `basedosdados.br_inep_enem.microdados`
+5. **IDH (Índice de Desenvolvimento Humano):** `basedosdados.br_pnud_idhm.municipio` (colunas: id_municipio, ano, idhm, idhm_e, idhm_l, idhm_r)
+6. **Eleições TSE:** `basedosdados.br_tse_eleicoes.resultados_candidato_municipio`
+7. **ENEM (INEP):** `basedosdados.br_inep_enem.microdados`
 
 - Limite os resultados a no máximo 100 linhas (use LIMIT 100) a menos que solicitado o contrário.
 
@@ -54,19 +55,25 @@ E o banco de dados retornou os seguintes dados (limitado às primeiras 20 linhas
 NÃO gere a tabela de dados no texto, pois o sistema já vai exibir a tabela real interativa logo abaixo da sua análise.
 """
 
-CHART_PROMPT = """Você é um especialista em visualização de dados.
+ML_PROMPT = """Você é um Cientista de Dados (Data Scientist).
 O usuário fez a pergunta: "{question}"
-Os dados retornados têm as seguintes colunas e amostras:
+Os dados extraídos do banco têm as seguintes colunas e amostras:
 {data}
 
-Retorne um JSON sugerindo qual tipo de gráfico desenhar. Use estritamente o formato abaixo e nenhuma outra palavra:
+Retorne um JSON sugerindo qual algoritmo matemático de Machine Learning ou Estatística deve ser rodado no Python antes de exibir a tabela. Use estritamente o formato abaixo e nenhuma outra palavra:
 {{
-  "type": "bar" | "line" | "none",
-  "x_col": "nome_da_coluna_eixo_x",
-  "y_col": "nome_da_coluna_eixo_y",
-  "reason": "motivo resumido"
+  "ml_task": "kmeans" | "regression" | "correlation" | "summary" | "none",
+  "x_col": "nome_da_coluna_eixo_x_ou_alvo1",
+  "y_col": "nome_da_coluna_eixo_y_ou_alvo2",
+  "k": 3, 
+  "chart_type": "scatter" | "bar" | "line" | "none",
+  "reason": "motivo resumido da escolha matemática"
 }}
-Se não fizer sentido desenhar gráfico (ex: retornou apenas 1 número ou colunas incompatíveis), retorne "type": "none".
+- Use "kmeans" para segmentação ou agrupamento numérico (escolha um valor para 'k' adequado, default 3).
+- Use "regression" para prever ou achar tendência/relação entre 'x_col' e 'y_col'.
+- Use "correlation" para analisar a matriz de correlação se a pergunta pedir correlações estatísticas entre todas as métricas.
+- Use "summary" para sumarização ou análise descritiva simples.
+- Se não houver pedido analítico complexo, retorne "ml_task": "none" e sugira um "chart_type" comum (bar, line).
 Retorne APENAS o JSON válido, sem tags markdown.
 """
 
@@ -145,25 +152,25 @@ def ask(question: str) -> dict:
         chain_analysis = prompt_analysis | llm | StrOutputParser()
         analysis = chain_analysis.invoke({"question": question, "sql": sql_query, "data": data_sample})
         
-        # 4. Gráfico
-        prompt_chart = ChatPromptTemplate.from_template(CHART_PROMPT)
-        chain_chart = prompt_chart | llm | StrOutputParser()
-        chart_json_str = chain_chart.invoke({"question": question, "data": data_sample})
+        # 4. Machine Learning & Gráfico
+        prompt_ml = ChatPromptTemplate.from_template(ML_PROMPT)
+        chain_ml = prompt_ml | llm | StrOutputParser()
+        ml_json_str = chain_ml.invoke({"question": question, "data": data_sample})
         
-        chart_config = {"type": "none"}
+        ml_config = {"ml_task": "none", "chart_type": "none"}
         try:
             import re
-            match = re.search(r'\{.*\}', chart_json_str, re.DOTALL)
+            match = re.search(r'\{.*\}', ml_json_str, re.DOTALL)
             if match:
-                chart_config = json.loads(match.group())
+                ml_config = json.loads(match.group())
         except Exception as e:
-            pass # fallback silencioso para 'none' se o JSON falhar
+            pass # fallback silencioso
             
         return {
             "sql": sql_query,
             "dataframe": df,
             "analysis": analysis,
-            "chart_config": chart_config
+            "ml_config": ml_config
         }
 
     except Exception as e:
