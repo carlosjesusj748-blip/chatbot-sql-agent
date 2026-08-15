@@ -214,6 +214,15 @@ def render_message(msg_content):
             df = msg_content.get("dataframe")
             st.dataframe(df, use_container_width=True)
             
+            # Botão de Download CSV
+            csv = df.to_csv(index=False).encode('utf-8')
+            st.download_button(
+                label="📥 Baixar Dados (CSV)",
+                data=csv,
+                file_name="dados_extracao.csv",
+                mime="text/csv",
+            )
+            
             # 4. Gráfico (se aplicável)
             chart = msg_content.get("chart_config", {})
             chart_type = chart.get("type", "none")

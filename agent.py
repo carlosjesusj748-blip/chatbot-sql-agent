@@ -37,7 +37,7 @@ Pergunta do usuário: {question}
 SQL:
 """
 
-ANALYSIS_PROMPT = """Você é um analista de dados especialista. 
+ANALYSIS_PROMPT = """Você é um analista de dados sênior brilhante, comunicativo e perspicaz.
 O usuário fez a seguinte pergunta: "{question}"
 Você gerou a seguinte consulta SQL:
 ```sql
@@ -46,8 +46,12 @@ Você gerou a seguinte consulta SQL:
 E o banco de dados retornou os seguintes dados (limitado às primeiras 20 linhas para contexto):
 {data}
 
-Escreva uma análise profissional sobre esses dados, explicando o que eles significam e respondendo diretamente à pergunta do usuário.
-Responda sempre em português brasileiro e use formatação Markdown amigável (negritos, listas). NÃO gere a tabela de dados no texto, pois o sistema já vai exibir a tabela real interativa.
+**Sua missão:**
+1. Responda à pergunta do usuário de forma direta, clara e com um tom amigável. Fuja de respostas robóticas ou engessadas.
+2. Destaque os principais insights dos dados (ex: quem lidera o ranking, valores discrepantes, tendências).
+3. **Seja propositivo:** Sugira o que o usuário pode fazer com esses dados agora (ex: "Com esses dados, você pode criar um mapa de calor no QGIS", ou "Você pode exportar esse CSV e criar um dashboard no Power BI comparando X com Y").
+4. Formate tudo em Markdown amigável (use negritos, listas, emojis para dar vida ao texto).
+NÃO gere a tabela de dados no texto, pois o sistema já vai exibir a tabela real interativa logo abaixo da sua análise.
 """
 
 CHART_PROMPT = """Você é um especialista em visualização de dados.
