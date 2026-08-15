@@ -33,6 +33,7 @@ Aqui está o mapa de tabelas que você DEVE usar para responder as perguntas com
 
 - Limite os resultados a no máximo 100 linhas (use LIMIT 100) a menos que solicitado o contrário.
 - **MUITO IMPORTANTE:** NUNCA use funções de Machine Learning do BigQuery (como ML.KMEANS, ML.LINEAR_REG). O Machine Learning será feito no Python! O seu SQL deve retornar apenas os DADOS BRUTOS (ex: SELECT populacao, pib FROM ...).
+- **SINTAXE SQL:** No BigQuery, use sempre `=` para igualdade, NUNCA `==`. Exemplo correto: `WHERE sigla_uf = 'SP'`.
 
 Pergunta do usuário: {question}
 SQL:
