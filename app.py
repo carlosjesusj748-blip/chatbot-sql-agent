@@ -106,17 +106,10 @@ with st.sidebar:
     st.markdown("---")
 
     # Status do banco
-    db_exists = os.path.exists("vendas.db")
-    if db_exists:
-        st.markdown(
-            '<span class="status-badge status-online">● Banco Conectado</span>',
-            unsafe_allow_html=True,
-        )
-    else:
-        st.markdown(
-            '<span class="status-badge status-offline">● Banco Não Encontrado</span>',
-            unsafe_allow_html=True,
-        )
+    st.markdown(
+        '<span class="status-badge status-online">● Conectado ao BigQuery (Base dos Dados)</span>',
+        unsafe_allow_html=True,
+    )
 
     # Status da API Key
     api_key = os.environ.get("GOOGLE_API_KEY", "")
@@ -144,39 +137,21 @@ with st.sidebar:
     st.markdown("---")
 
     # Info do banco
-    if db_exists:
-        st.markdown('<div class="sidebar-card">', unsafe_allow_html=True)
-        st.markdown("#### 📊 Catálogo do Banco")
-        try:
-            conn = sqlite3.connect("vendas.db")
-            cursor = conn.cursor()
-
-            tabelas = cursor.execute(
-                "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"
-            ).fetchall()
-
-            for (tabela,) in tabelas:
-                colunas = cursor.execute(f"PRAGMA table_info({tabela})").fetchall()
-                count = cursor.execute(f"SELECT COUNT(*) FROM {tabela}").fetchone()[0]
-                col_names = [c[1] for c in colunas]
-
-                st.markdown(f"**🗂️ {tabela}** ({count} registros)")
-                st.caption(", ".join(col_names))
-
-            conn.close()
-        except Exception as e:
-            st.error(f"Erro ao ler banco: {e}")
-        st.markdown("</div>", unsafe_allow_html=True)
+    st.markdown('<div class="sidebar-card">', unsafe_allow_html=True)
+    st.markdown("#### 📊 BigQuery / Base dos Dados")
+    st.markdown("O assistente agora está conectado ao catálogo público da Base dos Dados via Google BigQuery.")
+    st.markdown("Você pode explorar dados de IBGE, TSE, INEP, entre outros.")
+    st.markdown("</div>", unsafe_allow_html=True)
 
     # Exemplos de perguntas
     st.markdown('<div class="sidebar-card">', unsafe_allow_html=True)
     st.markdown("#### 💡 Exemplos de Perguntas")
     st.markdown("""
-- Qual o total de vendas por estado?
-- Top 5 produtos mais vendidos
-- Qual cliente gerou mais receita?
-- Vendas por categoria no último trimestre
-- Ticket médio por segmento de cliente
+- Qual a população dos municípios de SP em 2022 segundo o IBGE?
+- Mostre os 5 municípios com maior PIB per capita no último ano disponível.
+- Qual a taxa de desemprego atual do Brasil segundo a PNAD?
+- Quantos votos o candidato X teve em SP nas últimas eleições?
+- Mostre as 5 escolas com melhor nota do ENEM no Ceará.
     """)
     st.markdown("</div>", unsafe_allow_html=True)
 

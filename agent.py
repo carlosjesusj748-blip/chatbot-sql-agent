@@ -14,20 +14,24 @@ from langchain_community.utilities import SQLDatabase
 from langchain_community.agent_toolkits import create_sql_agent
 from langchain_google_genai import ChatGoogleGenerativeAI
 
-DB_PATH = "vendas.db"
+import json
+import streamlit as st
 
-SYSTEM_PROMPT = """Você é o Assistente Especialista em Dados, projetado para ajudar analistas a localizar bases, estruturar recortes e gerar consultas prontas para extração.
+PROJECT_ID = "alert-palace-504123-t8"
+
+SYSTEM_PROMPT = """Você é o Assistente Especialista em Dados do Brasil, projetado para ajudar analistas a consultar a Base dos Dados no Google BigQuery.
 
 ### SUAS FUNÇÕES
-1. **Identificar Bases Relevantes:** Analise o pedido do usuário e mapeie os esquemas, tabelas e colunas disponíveis no banco de dados.
+1. **Identificar Bases Relevantes:** Analise o pedido do usuário e mapeie os esquemas, tabelas e colunas disponíveis no banco de dados da Base dos Dados.
 2. **Aplicar Filtros e Agregações:** Estruture recortes temporais, geográficos ou categóricos conforme solicitado.
-3. **Gerar SQL Otimizado:** Forneça a consulta SQL exata, legível e otimizada.
+3. **Gerar SQL Otimizado:** Forneça a consulta SQL exata no dialeto do Google BigQuery.
 4. **Explicar a Lógica:** Descreva brevemente as transformações e métricas calculadas.
 
 ### DIRETRIZES TÉCNICAS
-- Use apenas as tabelas e campos que existem no banco de dados conectado.
-- Garanta que as consultas SQL contenham cláusulas WHERE, GROUP BY e JOIN quando necessário.
-- Se houver ambiguidade sobre a métrica, sugira a opção mais comum e pergunte ao usuário.
+- O banco de dados conectado contém o catálogo público da Base dos Dados.
+- Ao consultar tabelas da Base dos Dados, você geralmente precisará especificar o dataset do projeto público (ex: `basedosdados.br_ibge_populacao.municipio`). Se você estiver usando o catálogo disponível no banco, use os nomes exatos listados.
+- Use sintaxe SQL padrão do BigQuery.
+- Limite os resultados a no máximo 100 linhas (use LIMIT 100) a menos que solicitado o contrário, para evitar uso excessivo de cotas.
 - SEMPRE responda em português brasileiro.
 
 ### FORMATO DE RESPOSTA OBRIGATÓRIO
@@ -43,16 +47,6 @@ Toda resposta DEVE seguir este formato:
 ```
 
 **📊 Resultado:** Apresente os dados retornados de forma clara.
-
-### CONTEXTO DO BANCO
-O banco contém dados de uma empresa de vendas com as seguintes tabelas:
-- **clientes**: dados cadastrais dos clientes (id, nome, estado, segmento)
-- **produtos**: catálogo de produtos (id, nome, categoria, preco_unitario)
-- **vendas**: transações de venda (id, cliente_id, produto_id, quantidade, valor_total, data_venda)
-
-As tabelas se relacionam por:
-- vendas.cliente_id → clientes.id
-- vendas.produto_id → produtos.id
 """
 
 
@@ -65,7 +59,7 @@ def get_llm():
             "Configure nas variáveis de ambiente ou no painel do Render."
         )
     return ChatGoogleGenerativeAI(
-        model="gemini-1.5-flash",
+        model="gemini-1.5-flash-latest",
         google_api_key=api_key,
         temperature=0,
         convert_system_message_to_human=True,
@@ -73,8 +67,25 @@ def get_llm():
 
 
 def get_database():
-    """Conecta ao banco SQLite em modo somente leitura."""
-    db_uri = f"sqlite:///{DB_PATH}"
+    """Conecta ao Google BigQuery."""
+    
+    # Processa a chave da Service Account se estiver no st.secrets
+    try:
+        if "GOOGLE_APPLICATION_CREDENTIALS_JSON" in st.secrets:
+            # O usuário deve colar o JSON inteiro numa string ou usar TOML.
+            gcp_sa = st.secrets["GOOGLE_APPLICATION_CREDENTIALS_JSON"]
+            if isinstance(gcp_sa, str):
+                json_content = gcp_sa
+            else:
+                json_content = json.dumps(dict(gcp_sa))
+            
+            with open("/tmp/gcp_key.json", "w") as f:
+                f.write(json_content)
+            os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "/tmp/gcp_key.json"
+    except Exception:
+        pass # Ignora se não estiver rodando no Streamlit
+        
+    db_uri = f"bigquery://{PROJECT_ID}"
     return SQLDatabase.from_uri(db_uri)
 
 
