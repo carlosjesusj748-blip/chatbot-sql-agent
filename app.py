@@ -191,10 +191,47 @@ if "messages" not in st.session_state:
         }
     ]
 
+# Função auxiliar para renderizar a resposta rica
+def render_message(msg_content):
+    if isinstance(msg_content, str):
+        st.markdown(msg_content)
+    elif isinstance(msg_content, dict):
+        if "error" in msg_content:
+            st.error(msg_content["error"])
+            if "sql" in msg_content:
+                with st.expander("Ver SQL Gerado"):
+                    st.code(msg_content["sql"], language="sql")
+        else:
+            # 1. Análise
+            st.markdown(msg_content.get("analysis", ""))
+            
+            # 2. Código SQL (Oculto)
+            with st.expander("💻 Ver Código SQL"):
+                st.code(msg_content.get("sql", ""), language="sql")
+            
+            # 3. Tabela de Dados Interativa
+            st.markdown("### 🗂️ Dados Extraídos")
+            df = msg_content.get("dataframe")
+            st.dataframe(df, use_container_width=True)
+            
+            # 4. Gráfico (se aplicável)
+            chart = msg_content.get("chart_config", {})
+            chart_type = chart.get("type", "none")
+            if chart_type in ["bar", "line"]:
+                st.markdown(f"### 📊 Visualização Gráfica")
+                st.caption(chart.get("reason", ""))
+                try:
+                    if chart_type == "bar":
+                        st.bar_chart(df, x=chart.get("x_col"), y=chart.get("y_col"))
+                    elif chart_type == "line":
+                        st.line_chart(df, x=chart.get("x_col"), y=chart.get("y_col"))
+                except Exception as e:
+                    st.warning(f"Não foi possível desenhar o gráfico: {e}")
+
 # Exibir mensagens anteriores
 for message in st.session_state.messages:
     with st.chat_message(message["role"], avatar="🤖" if message["role"] == "assistant" else "👤"):
-        st.markdown(message["content"])
+        render_message(message["content"])
 
 # ── Input do Usuário ──────────────────────────────────────────────────
 if prompt := st.chat_input("Digite sua pergunta sobre os dados..."):
@@ -205,19 +242,16 @@ if prompt := st.chat_input("Digite sua pergunta sobre os dados..."):
 
     # Gerar resposta
     with st.chat_message("assistant", avatar="🤖"):
-        with st.spinner("🔄 Analisando sua pergunta e gerando SQL..."):
+        with st.spinner("🔄 Analisando sua pergunta, processando SQL e gerando insights..."):
             try:
                 from agent import ask
                 response = ask(prompt)
             except ValueError as ve:
-                response = str(ve)
+                response = {"error": str(ve)}
             except Exception as e:
-                response = (
-                    f"❌ **Erro inesperado:** {str(e)}\n\n"
-                    "Verifique se a API Key da Groq está configurada corretamente."
-                )
+                response = {"error": f"❌ **Erro inesperado:** {str(e)}\n\nVerifique se a API Key da Groq está configurada corretamente."}
 
-        st.markdown(response)
+        render_message(response)
 
     # Salvar resposta no histórico
     st.session_state.messages.append({"role": "assistant", "content": response})

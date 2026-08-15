@@ -5,3 +5,5 @@ langchain-groq
 sqlalchemy==2.0.41
 google-cloud-bigquery
 sqlalchemy-bigquery
+pandas
+db-dtypes
