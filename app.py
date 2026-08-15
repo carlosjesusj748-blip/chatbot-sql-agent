@@ -167,7 +167,12 @@ with st.sidebar:
 
 
 # ── Header Principal ──────────────────────────────────────────────────
-st.image("header_image.jpg", use_container_width=True)
+try:
+    import os
+    image_path = os.path.join(os.path.dirname(__file__), "header_image.jpg")
+    st.image(image_path, use_container_width=True)
+except Exception:
+    pass
 st.markdown("""
 <div class="main-header">
     <h1>🤖 Assistente Especialista em Dados</h1>
@@ -206,9 +211,9 @@ def render_message(msg_content):
             # 1. Análise
             st.markdown(msg_content.get("analysis", ""))
             
-            # 2. Código SQL (Visível)
-            st.markdown("### 💻 Código SQL Gerado")
-            st.code(msg_content.get("sql", ""), language="sql")
+            # 2. Código SQL (Expansível)
+            with st.expander("💻 Ver Código SQL"):
+                st.code(msg_content.get("sql", ""), language="sql")
             
             # 3. Tabela de Dados Interativa
             st.markdown("### 🗂️ Dados Extraídos")
