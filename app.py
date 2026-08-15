@@ -112,10 +112,16 @@ with st.sidebar:
     )
 
     # Status da API Key
-    api_key = os.environ.get("GOOGLE_API_KEY", "")
+    api_key = os.environ.get("GROQ_API_KEY", "")
+    if not api_key:
+        try:
+            api_key = st.secrets.get("GROQ_API_KEY", "")
+        except:
+            pass
+
     if api_key:
         st.markdown(
-            '<span class="status-badge status-online">● Gemini Conectado</span>',
+            '<span class="status-badge status-online">● Groq Conectado</span>',
             unsafe_allow_html=True,
         )
     else:
@@ -125,12 +131,12 @@ with st.sidebar:
         )
         st.markdown("---")
         manual_key = st.text_input(
-            "🔑 Cole sua Google API Key:",
+            "🔑 Cole sua Groq API Key:",
             type="password",
-            help="Obtenha em: https://aistudio.google.com/app/apikey",
+            help="Obtenha em: https://console.groq.com/keys",
         )
         if manual_key:
-            os.environ["GOOGLE_API_KEY"] = manual_key
+            os.environ["GROQ_API_KEY"] = manual_key
             st.success("✅ API Key configurada!")
             st.rerun()
 
@@ -157,7 +163,7 @@ with st.sidebar:
 
     st.markdown("---")
     st.caption("Assistente Especialista em Dados v1.0")
-    st.caption("Powered by Gemini + LangChain")
+    st.caption("Powered by Groq (LLaMA 3) + LangChain")
 
 
 # ── Header Principal ──────────────────────────────────────────────────
@@ -208,7 +214,7 @@ if prompt := st.chat_input("Digite sua pergunta sobre os dados..."):
             except Exception as e:
                 response = (
                     f"❌ **Erro inesperado:** {str(e)}\n\n"
-                    "Verifique se a API Key do Gemini está configurada corretamente."
+                    "Verifique se a API Key da Groq está configurada corretamente."
                 )
 
         st.markdown(response)

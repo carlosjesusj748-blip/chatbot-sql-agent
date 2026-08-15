@@ -12,7 +12,7 @@ Recebe perguntas em linguagem natural e retorna:
 import os
 from langchain_community.utilities import SQLDatabase
 from langchain_community.agent_toolkits import create_sql_agent
-from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_groq import ChatGroq
 
 import json
 import streamlit as st
@@ -51,18 +51,24 @@ Toda resposta DEVE seguir este formato:
 
 
 def get_llm():
-    """Inicializa o modelo Gemini."""
-    api_key = os.environ.get("GOOGLE_API_KEY", "")
+    """Inicializa o modelo da Groq."""
+    api_key = os.environ.get("GROQ_API_KEY", "")
+    if not api_key:
+        # Tenta pegar dos secrets do Streamlit
+        try:
+            api_key = st.secrets.get("GROQ_API_KEY", "")
+        except Exception:
+            pass
+            
     if not api_key:
         raise ValueError(
-            "❌ Variável GOOGLE_API_KEY não encontrada. "
-            "Configure nas variáveis de ambiente ou no painel do Render."
+            "❌ Variável GROQ_API_KEY não encontrada. "
+            "Configure nas variáveis de ambiente ou no painel."
         )
-    return ChatGoogleGenerativeAI(
-        model="gemini-1.5-flash-latest",
-        google_api_key=api_key,
+    return ChatGroq(
+        model="llama3-70b-8192",
+        api_key=api_key,
         temperature=0,
-        convert_system_message_to_human=True,
     )
 
 
