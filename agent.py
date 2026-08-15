@@ -27,7 +27,7 @@ Tema:"""
 TABLE_SCHEMAS_MAP = {
     "economia": "1. IBGE PIB: `basedosdados.br_ibge_pib.municipio`\n2. IBGE IPCA: `basedosdados.br_ibge_ipca.mes_brasil`",
     "educacao": "1. INEP Censo Escolar: `basedosdados.br_inep_censo_escolar.escola`",
-    "saude": "1. SIM DataSUS (Mortalidade): `basedosdados.br_ms_datasus.sim`",
+    "saude": "1. SIM DataSUS (Mortalidade): `basedosdados.br_ms_sim.microdados` (colunas cruciais: ano, sigla_uf, id_municipio_ocorrencia, id_municipio_residencia, circunstancia_obito)",
     "trabalho": "1. Novo CAGED: `basedosdados.br_me_caged.microdados_movimentacao`\n2. RAIS: `basedosdados.br_me_rais.microdados_vinculos`",
     "seguranca": "1. ABSP Município: `basedosdados.br_fbsp_absp.municipio`\n2. ABSP UF: `basedosdados.br_fbsp_absp.uf`\n3. Ocorrências SP: `basedosdados.br_sp_gov_ssp.ocorrencias_registradas`",
     "geografia": "1. Municípios: `basedosdados.br_bd_diretorios_brasil.municipio`\n2. UF: `basedosdados.br_bd_diretorios_brasil.uf`\n3. Setor Censitário: `basedosdados.br_bd_diretorios_brasil.setor_censitario`",
@@ -52,6 +52,12 @@ SQL_PROMPT = """Você é um Engenheiro e Analista de Dados especialista no ecoss
    - Escreva sempre em padrão Google BigQuery (Standard SQL), envolvendo os caminhos das tabelas entre crases (`basedosdados.dataset.tabela`).
    - Evite `SELECT *`; selecione apenas as colunas necessárias e aplique `LIMIT` apropriado se não houver agregação.
    - NUNCA use funções de Machine Learning do BigQuery (como ML.KMEANS).
+4. OTIMIZAÇÃO E CONTAGEM:
+   - Sempre que consultar tabelas grandes como `br_ms_sim` ou censos, é OBRIGATÓRIO incluir um filtro de `ano` (ex: `ano = 2022`) na cláusula WHERE.
+   - Nunca assuma a existência de uma coluna `id`. Se precisar contar o total de registros (linhas) de uma tabela e não tiver certeza da chave primária, utilize SEMPRE `COUNT(*)`.
+
+### REGRA DE FORMATAÇÃO DA SAÍDA
+Sempre que gerar uma query SQL, você DEVE encapsulá-la em um bloco de código markdown ` ```sql ... ``` `. Nunca deixe a query solta no meio do texto ou responda apenas com texto.
 
 Aqui está o mapa de tabelas que você DEVE usar para responder a pergunta:
 {tabelas_contexto}
@@ -141,6 +147,14 @@ def get_engine():
     db_uri = f"bigquery://{PROJECT_ID}"
     return create_engine(db_uri)
 
+import re
+def extrair_sql(texto_llm):
+    """Extrai apenas o bloco SQL da resposta do LLM."""
+    match = re.search(r"```sql\n(.*?)\n```", texto_llm, re.DOTALL | re.IGNORECASE)
+    if match:
+        return match.group(1).strip()
+    return texto_llm.strip()
+
 def validar_query_bigquery(query_sql):
     """
     Valida a sintaxe e o schema da query usando o Dry Run do BigQuery.
@@ -193,12 +207,12 @@ def ask(question: str) -> dict:
             
             prompt_sql = ChatPromptTemplate.from_template(SQL_PROMPT)
             chain_sql = prompt_sql | llm | StrOutputParser()
-            sql_query = chain_sql.invoke({
+            resposta_llm = chain_sql.invoke({
                 "question": question,
                 "tabelas_contexto": tabelas_contexto,
                 "contexto_erro": contexto_erro
             })
-            sql_query = sql_query.replace("```sql", "").replace("```", "").strip()
+            sql_query = extrair_sql(resposta_llm)
             
             sucesso, msg = validar_query_bigquery(sql_query)
             if sucesso:
