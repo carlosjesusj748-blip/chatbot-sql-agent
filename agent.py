@@ -42,6 +42,12 @@ Gere APENAS o código SQL para responder à pergunta do usuário, sem NENHUM tex
 - Sempre use o caminho completo no padrão `basedosdados.dataset.tabela`.
 - OBRIGATÓRIO: Você DEVE envolver o nome completo da tabela com crases (backticks) no FROM e JOIN. Exemplo: \`basedosdados.dataset.tabela\`
 
+### REGRAS DE ESQUEMA E DIRETÓRIOS
+- A tabela `basedosdados.br_bd_diretorios_brasil.municipio` já possui `sigla_uf` e `nome`. Não faça JOIN desnecessário com a tabela `uf` para obter o estado.
+- Na tabela `basedosdados.br_bd_diretorios_brasil.uf`, o campo da sigla é `sigla` (não `sigla_uf`).
+- A tabela `br_sp_gov_ssp.ocorrencias_registradas` é restrita exclusivamente ao estado de São Paulo ('SP'). Para análises nacionais ou de outros estados (como 'BA'), utilize `br_ms_datasus.sim` ou `br_fbsp_absp`.
+
+
 Aqui está o mapa de tabelas que você DEVE usar para responder a pergunta:
 {tabelas_contexto}
 
