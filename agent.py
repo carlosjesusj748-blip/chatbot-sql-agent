@@ -37,6 +37,7 @@ Gere APENAS o código SQL para responder à pergunta do usuário, sem NENHUM tex
 ### DIRETRIZES TÉCNICAS
 - ATENÇÃO: Os dados reais estão no projeto público `basedosdados`. 
 - Sempre use o caminho completo no padrão `basedosdados.dataset.tabela`.
+- OBRIGATÓRIO: Você DEVE envolver o nome completo da tabela com crases (backticks) no FROM e JOIN. Exemplo: \`basedosdados.dataset.tabela\`
 
 Aqui está o mapa de tabelas que você DEVE usar para responder a pergunta:
 {tabelas_contexto}
