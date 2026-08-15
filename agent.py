@@ -16,6 +16,21 @@ from langchain_core.output_parsers import StrOutputParser
 
 PROJECT_ID = "alert-palace-504123-t8"
 
+ROUTER_PROMPT = """Você é um assistente de roteamento.
+Classifique a pergunta do usuário em APENAS UM dos seguintes temas: economia, educacao, seguranca ou geral.
+Responda APENAS com o nome do tema, sem pontuação ou explicação.
+Pergunta: {question}
+Tema:"""
+
+TABLE_SCHEMAS_MAP = {
+    "economia": "1. IBGE PIB: `basedosdados.br_ibge_pib.municipio` (colunas: id_municipio, ano, pib, impostos_liquidos, pib_per_capita)\n2. Desemprego (PNADC): `basedosdados.br_ibge_pnadc.microdados`",
+    "educacao": "1. ENEM (INEP): `basedosdados.br_inep_enem.microdados`",
+    "seguranca": "1. Segurança Pública (Homicídios, Latrocínios, etc): `basedosdados.br_fbsp_anuario_seguranca_publica.municipio` (colunas: id_municipio, ano, homicidio_doloso, latrocinio, lesao_corporal_morte)",
+    "geral": "1. IBGE População: `basedosdados.br_ibge_populacao.municipio` (colunas: id_municipio, ano, populacao)\n2. Eleições TSE: `basedosdados.br_tse_eleicoes.resultados_candidato_municipio`"
+}
+
+BASE_TABLE = "0. Diretório de Municípios (Obrigatório para Nomes): `basedosdados.br_bd_diretorios_brasil.municipio` (colunas: id_municipio, nome, sigla_uf). FAÇA JOIN com essa tabela sempre que precisar do Nome."
+
 SQL_PROMPT = """Você é um analista de dados especialista em Google BigQuery.
 Gere APENAS o código SQL para responder à pergunta do usuário, sem NENHUM texto adicional, sem formatação markdown e sem crases (```). Apenas o SELECT válido.
 
@@ -23,14 +38,8 @@ Gere APENAS o código SQL para responder à pergunta do usuário, sem NENHUM tex
 - ATENÇÃO: Os dados reais estão no projeto público `basedosdados`. 
 - Sempre use o caminho completo no padrão `basedosdados.dataset.tabela`.
 
-Aqui está o mapa de tabelas que você DEVE usar para responder as perguntas comuns:
-1. **Diretório de Municípios (PARA PEGAR O NOME DO MUNICÍPIO/ESTADO):** `basedosdados.br_bd_diretorios_brasil.municipio` (colunas: id_municipio, nome, sigla_uf). FAÇA JOIN com essa tabela sempre que o usuário quiser ver Nomes em vez de IDs.
-2. **IBGE População:** `basedosdados.br_ibge_populacao.municipio` (colunas: id_municipio, ano, populacao)
-3. **IBGE PIB:** `basedosdados.br_ibge_pib.municipio` (colunas: id_municipio, ano, pib, impostos_liquidos, pib_per_capita)
-4. **Desemprego (PNADC):** `basedosdados.br_ibge_pnadc.microdados` (tabela pesada, sempre agregue)
-5. **Eleições TSE:** `basedosdados.br_tse_eleicoes.resultados_candidato_municipio`
-6. **ENEM (INEP):** `basedosdados.br_inep_enem.microdados`
-7. **Segurança Pública (Homicídios, Latrocínios, etc):** `basedosdados.br_fbs_anuario_seguranca_publica.municipio` (colunas: id_municipio, ano, homicidio_doloso, latrocinio, lesao_corporal_morte)
+Aqui está o mapa de tabelas que você DEVE usar para responder a pergunta:
+{tabelas_contexto}
 
 - Limite os resultados a no máximo 100 linhas (use LIMIT 100) a menos que solicitado o contrário.
 - **MUITO IMPORTANTE:** NUNCA use funções de Machine Learning do BigQuery (como ML.KMEANS, ML.LINEAR_REG). O Machine Learning será feito no Python! O seu SQL deve retornar apenas os DADOS BRUTOS (ex: SELECT populacao, pib FROM ...).
@@ -133,10 +142,24 @@ def ask(question: str) -> dict:
         llm = get_llm()
         engine = get_engine()
         
+        # 0. Roteamento de Tema
+        prompt_router = ChatPromptTemplate.from_template(ROUTER_PROMPT)
+        chain_router = prompt_router | llm | StrOutputParser()
+        tema = chain_router.invoke({"question": question}).strip().lower()
+        
+        # Validar o tema retornado
+        if tema not in TABLE_SCHEMAS_MAP:
+            tema = "geral"
+            
+        tabelas_contexto = BASE_TABLE + "\n" + TABLE_SCHEMAS_MAP[tema]
+        
         # 1. Geração SQL
         prompt_sql = ChatPromptTemplate.from_template(SQL_PROMPT)
         chain_sql = prompt_sql | llm | StrOutputParser()
-        sql_query = chain_sql.invoke({"question": question})
+        sql_query = chain_sql.invoke({
+            "question": question,
+            "tabelas_contexto": tabelas_contexto
+        })
         sql_query = sql_query.replace("```sql", "").replace("```", "").strip()
         
         # 2. Execução
