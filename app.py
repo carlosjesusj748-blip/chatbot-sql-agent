@@ -167,6 +167,7 @@ with st.sidebar:
 
 
 # ── Header Principal ──────────────────────────────────────────────────
+st.image("header_image.jpg", use_container_width=True)
 st.markdown("""
 <div class="main-header">
     <h1>🤖 Assistente Especialista em Dados</h1>

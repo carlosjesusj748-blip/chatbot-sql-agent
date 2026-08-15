@@ -28,11 +28,11 @@ Aqui está o mapa de tabelas que você DEVE usar para responder as perguntas com
 2. **IBGE População:** `basedosdados.br_ibge_populacao.municipio` (colunas: id_municipio, ano, populacao)
 3. **IBGE PIB:** `basedosdados.br_ibge_pib.municipio` (colunas: id_municipio, ano, pib, impostos_liquidos, pib_per_capita)
 4. **Desemprego (PNADC):** `basedosdados.br_ibge_pnadc.microdados` (tabela pesada, sempre agregue)
-5. **IDH (Índice de Desenvolvimento Humano):** `basedosdados.br_pnud_idhm.municipio` (colunas: id_municipio, ano, idhm, idhm_e, idhm_l, idhm_r)
-6. **Eleições TSE:** `basedosdados.br_tse_eleicoes.resultados_candidato_municipio`
-7. **ENEM (INEP):** `basedosdados.br_inep_enem.microdados`
+5. **Eleições TSE:** `basedosdados.br_tse_eleicoes.resultados_candidato_municipio`
+6. **ENEM (INEP):** `basedosdados.br_inep_enem.microdados`
 
 - Limite os resultados a no máximo 100 linhas (use LIMIT 100) a menos que solicitado o contrário.
+- **MUITO IMPORTANTE:** NUNCA use funções de Machine Learning do BigQuery (como ML.KMEANS, ML.LINEAR_REG). O Machine Learning será feito no Python! O seu SQL deve retornar apenas os DADOS BRUTOS (ex: SELECT populacao, pib FROM ...).
 
 Pergunta do usuário: {question}
 SQL:
