@@ -198,7 +198,7 @@ if "messages" not in st.session_state:
     ]
 
 # Função auxiliar para renderizar a resposta rica
-def render_message(msg_content):
+def render_message(msg_content, msg_idx=0):
     if isinstance(msg_content, str):
         st.markdown(msg_content)
     elif isinstance(msg_content, dict):
@@ -227,6 +227,7 @@ def render_message(msg_content):
                 data=csv,
                 file_name="dados_extracao.csv",
                 mime="text/csv",
+                key=f"download_{msg_idx}"
             )
             
             # 4. Machine Learning & Gráfico
@@ -297,9 +298,9 @@ def render_message(msg_content):
                     st.warning(f"Não foi possível desenhar o gráfico: {e}")
 
 # Exibir mensagens anteriores
-for message in st.session_state.messages:
+for idx, message in enumerate(st.session_state.messages):
     with st.chat_message(message["role"], avatar="🤖" if message["role"] == "assistant" else "👤"):
-        render_message(message["content"])
+        render_message(message["content"], idx)
 
 # ── Input do Usuário ──────────────────────────────────────────────────
 if prompt := st.chat_input("Digite sua pergunta sobre os dados..."):
@@ -319,7 +320,7 @@ if prompt := st.chat_input("Digite sua pergunta sobre os dados..."):
             except Exception as e:
                 response = {"error": f"❌ **Erro inesperado:** {str(e)}\n\nVerifique se a API Key da Groq está configurada corretamente."}
 
-        render_message(response)
+        render_message(response, len(st.session_state.messages))
 
     # Salvar resposta no histórico
     st.session_state.messages.append({"role": "assistant", "content": response})
