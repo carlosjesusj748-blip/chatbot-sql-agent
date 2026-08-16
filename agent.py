@@ -122,9 +122,10 @@ Os dados extraídos do banco têm as seguintes colunas e amostras:
 
 Retorne um JSON sugerindo qual algoritmo matemático de Machine Learning ou Estatística deve ser rodado no Python antes de exibir a tabela. Use estritamente o formato abaixo e nenhuma outra palavra:
 {{
-  "ml_task": "kmeans" | "regression" | "correlation" | "summary" | "outliers" | "distribution" | "timeseries" | "none",
+  "ml_task": "kmeans" | "regression" | "correlation" | "summary" | "outliers" | "distribution" | "timeseries" | "hypothesis" | "none",
   "x_col": "nome_da_coluna_eixo_x_ou_alvo1",
   "y_col": "nome_da_coluna_eixo_y_ou_alvo2",
+  "category_col": "coluna_para_agrupamento_ou_cores",
   "k": 3,
   "chart_type": "scatter" | "bar" | "line" | "histogram" | "box" | "heatmap" | "pie" | "none",
   "reason": "motivo resumido da escolha matemática"
@@ -135,7 +136,8 @@ Retorne um JSON sugerindo qual algoritmo matemático de Machine Learning ou Esta
 - Use "summary" para estatísticas descritivas (média, mediana, desvio padrão, quartis, assimetria) de uma coluna numérica em 'x_col'.
 - Use "outliers" para detectar valores atípicos (método IQR) em 'x_col'.
 - Use "distribution" para analisar a distribuição (histograma, assimetria/curtose) de 'x_col'.
-- Use "timeseries" quando houver uma coluna temporal/ano em 'x_col' e uma métrica numérica em 'y_col', para ver tendência ao longo do tempo (com média móvel).
+- Use "timeseries" quando houver uma coluna temporal/ano em 'x_col' e uma métrica numérica em 'y_col', para ver tendência ao longo do tempo. Opcionalmente use 'category_col' para gerar múltiplas linhas (ex: múltiplos estados).
+- Use "hypothesis" para realizar um teste de hipótese (Teste-T ou ANOVA) da métrica 'y_col' comparada entre os diferentes grupos da coluna categórica 'category_col'.
 - Se não houver pedido analítico complexo, retorne "ml_task": "none" e sugira apenas um "chart_type" comum (bar, line, scatter, pie) usando 'x_col'/'y_col' como eixos.
 Retorne APENAS o JSON válido, sem tags markdown.
 """
@@ -146,6 +148,7 @@ ML_CONFIG_DEFAULTS = {
     "ml_task": "none",
     "x_col": None,
     "y_col": None,
+    "category_col": None,
     "k": 3,
     "chart_type": "none",
     "reason": "",
@@ -657,33 +660,77 @@ def _executar_kmeans(df: pd.DataFrame, x_col, y_col, k):
     return {"stats": stats_texto}, fig
 
 
-def _executar_timeseries(df: pd.DataFrame, x_col, y_col):
-    """Tendência ao longo do tempo, com média móvel simples (janela de 3 pontos)."""
+def _executar_hypothesis(df: pd.DataFrame, y_col, category_col):
+    """Teste-T ou ANOVA para comparar médias entre grupos."""
+    if y_col not in _colunas_numericas(df) or category_col not in df.columns or category_col == y_col:
+        return {"stats": "Colunas insuficientes/ inválidas para teste de hipótese."}, None
+        
+    df_clean = df[[category_col, y_col]].dropna()
+    grupos = [grupo[y_col].values for nome, grupo in df_clean.groupby(category_col) if len(grupo) > 1]
+    
+    if len(grupos) < 2:
+        return {"stats": "Grupos insuficientes ou com poucos dados para teste de hipótese."}, None
+        
+    if len(grupos) == 2:
+        # Teste T de Student (assumindo variâncias independentes)
+        stat, pval = scipy_stats.ttest_ind(grupos[0], grupos[1], equal_var=False)
+        stats_texto = (
+            f"**Teste-T de Student (Welch): `{y_col}` por `{category_col}`**\n"
+            f"- Estatística t: {stat:.4f} | p-valor: {pval:.4g}\n"
+            f"- {'Diferença estatisticamente significativa' if pval < 0.05 else 'Não há diferença significativa'} (nível de 5%)."
+        )
+    else:
+        # ANOVA one-way
+        stat, pval = scipy_stats.f_oneway(*grupos)
+        stats_texto = (
+            f"**ANOVA One-Way: `{y_col}` por `{category_col}`**\n"
+            f"- Estatística F: {stat:.4f} | p-valor: {pval:.4g}\n"
+            f"- {'Há diferença estatisticamente significativa entre as médias dos grupos' if pval < 0.05 else 'Não há evidência de diferença entre as médias'} (nível de 5%)."
+        )
+        
+    fig = px.box(df_clean, x=category_col, y=y_col, color=category_col, title=f"Distribuição de {y_col} por {category_col} (Teste de Hipótese)")
+    return {"stats": stats_texto}, fig
+
+
+def _executar_timeseries(df: pd.DataFrame, x_col, y_col, category_col=None):
+    """Tendência ao longo do tempo, com média móvel simples. Suporta multilinhas."""
     numericas = _colunas_numericas(df)
     if x_col not in df.columns or y_col not in numericas:
         return {"stats": "Colunas insuficientes/ inválidas para série temporal."}, None
 
-    serie = df[[x_col]].copy()
-    serie[y_col] = _serie_numerica(df, y_col)
-    serie = serie.dropna().sort_values(x_col)
+    cols = [x_col, y_col]
+    if category_col and category_col in df.columns:
+        cols.append(category_col)
+        
+    serie = df[cols].copy().dropna().sort_values(x_col)
     if serie.empty:
-        return {"stats": f"A coluna `{y_col}` não tem valores numéricos válidos."}, None
-    serie["media_movel"] = serie[y_col].rolling(window=3, min_periods=1).mean()
+        return {"stats": f"Os dados não possuem valores numéricos válidos."}, None
+        
+    if category_col and category_col in serie.columns:
+        # Multi-linha
+        fig = px.line(serie, x=x_col, y=y_col, color=category_col, markers=True, title=f"Série Temporal Multi-linha de {y_col} ao longo de {x_col}")
+        stats_texto = f"**Série temporal multi-linha: `{y_col}` ao longo de `{x_col}` separado por `{category_col}`**\n"
+        
+        # Calcular média móvel por categoria
+        # Plotly Express already does a good job, we can just return it.
+        return {"stats": stats_texto}, fig
+    else:
+        # Simples (1 linha) com média móvel
+        serie["media_movel"] = serie[y_col].rolling(window=3, min_periods=1).mean()
+        variacao = None
+        if len(serie) >= 2 and serie[y_col].iloc[0] != 0:
+            variacao = (serie[y_col].iloc[-1] - serie[y_col].iloc[0]) / abs(serie[y_col].iloc[0]) * 100
 
-    variacao = None
-    if len(serie) >= 2 and serie[y_col].iloc[0] != 0:
-        variacao = (serie[y_col].iloc[-1] - serie[y_col].iloc[0]) / abs(serie[y_col].iloc[0]) * 100
-
-    stats_texto = (
-        f"**Série temporal: `{y_col}` ao longo de `{x_col}`**\n"
-        f"- Primeiro valor: {serie[y_col].iloc[0]:.2f} | Último valor: {serie[y_col].iloc[-1]:.2f}\n"
-        + (f"- Variação no período: {variacao:.1f}%\n" if variacao is not None else "")
-    )
-    fig = go.Figure()
-    fig.add_trace(go.Scatter(x=serie[x_col], y=serie[y_col], mode="lines+markers", name=y_col))
-    fig.add_trace(go.Scatter(x=serie[x_col], y=serie["media_movel"], mode="lines", name="Média móvel (3)"))
-    fig.update_layout(title=f"Tendência de {y_col} ao longo de {x_col}")
-    return {"stats": stats_texto}, fig
+        stats_texto = (
+            f"**Série temporal: `{y_col}` ao longo de `{x_col}`**\n"
+            f"- Primeiro valor: {serie[y_col].iloc[0]:.2f} | Último valor: {serie[y_col].iloc[-1]:.2f}\n"
+            + (f"- Variação no período: {variacao:.1f}%\n" if variacao is not None else "")
+        )
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(x=serie[x_col], y=serie[y_col], mode="lines+markers", name=y_col))
+        fig.add_trace(go.Scatter(x=serie[x_col], y=serie["media_movel"], mode="lines", name="Média móvel (3)"))
+        fig.update_layout(title=f"Tendência de {y_col} ao longo de {x_col}")
+        return {"stats": stats_texto}, fig
 
 
 def _gerar_grafico_padrao(df: pd.DataFrame, chart_type, x_col, y_col):
@@ -722,6 +769,7 @@ def executar_analise_ml(df: pd.DataFrame, ml_config: dict):
     chart_type = (ml_config or {}).get("chart_type", "none")
     x_col = _resolver_coluna(df, (ml_config or {}).get("x_col"))
     y_col = _resolver_coluna(df, (ml_config or {}).get("y_col"))
+    category_col = _resolver_coluna(df, (ml_config or {}).get("category_col"))
     k = (ml_config or {}).get("k", 3)
 
     try:
@@ -738,7 +786,9 @@ def executar_analise_ml(df: pd.DataFrame, ml_config: dict):
         elif ml_task == "kmeans":
             resultado, fig = _executar_kmeans(df, x_col, y_col, k)
         elif ml_task == "timeseries":
-            resultado, fig = _executar_timeseries(df, x_col, y_col)
+            resultado, fig = _executar_timeseries(df, x_col, y_col, category_col)
+        elif ml_task == "hypothesis":
+            resultado, fig = _executar_hypothesis(df, y_col, category_col)
         else:
             resultado, fig = None, None
 
@@ -808,7 +858,8 @@ def ask(question: str) -> dict:
                 "dataframe": pd.DataFrame(),
                 "ml_config": ML_CONFIG_DEFAULTS,
                 "estatisticas": None,
-                "figura": None
+                "figura": None,
+                "is_conversational": True
             }
 
         # 0.2 Roteamento de Tema via Metadados (RAG Local)

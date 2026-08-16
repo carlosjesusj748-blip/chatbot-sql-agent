@@ -211,6 +211,10 @@ def render_message(msg_content, msg_idx=0):
             # 1. Análise
             st.markdown(msg_content.get("analysis", ""))
             
+            # Se for apenas uma resposta conversacional, não renderiza componentes de dados
+            if msg_content.get("is_conversational"):
+                return
+            
             # 2. Código SQL (Expansível)
             with st.expander("💻 Ver Código SQL"):
                 st.code(msg_content.get("sql", ""), language="sql")
