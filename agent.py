@@ -73,8 +73,17 @@ Sempre que utilizar as tabelas abaixo, RESPEITE ESTRITAMENTE os nomes das coluna
    - Chave: `id_municipio`
    - Nomes: `nome`, `sigla_uf`
 3. `basedosdados.br_fbsp_absp.municipio` (Segurança Pública/Anuário)
-   - Chave: `id_municipio`, `ano`
-   - ATENÇÃO: Antes de usar esta tabela, se não tiver certeza dos nomes das colunas de métricas, rode uma subquery: SELECT column_name FROM `basedosdados.br_fbsp_absp.INFORMATION_SCHEMA.COLUMNS` WHERE table_name = 'municipio' para descobrir os nomes exatos.
+   - Chaves: `ano`, `sigla_uf`, `id_municipio`, `grupo`
+   - ATENÇÃO: Todas as métricas usam o prefixo `quantidade_`. Os nomes corretos são:
+     * `quantidade_homicidio_doloso` (homicídios dolosos)
+     * `quantidade_mortes_violentas_intencionais` (MVI / CVLI total)
+     * `quantidade_latrocinio` (latrocínio)
+     * `quantidade_lesao_corporal_morte` (lesão corporal seguida de morte)
+     * `quantidade_feminicidio` (feminicídio)
+     * `quantidade_estupro` (estupro)
+     * `quantidade_furto_veiculos`, `quantidade_roubo_veiculos`
+     * `quantidade_mortes_intervencao_policial`
+   - NUNCA use `homicidio_doloso` sem o prefixo `quantidade_`.
 
 ### REGRA DE FORMATAÇÃO DA SAÍDA
 Sempre que gerar uma query SQL, você DEVE encapsulá-la em um bloco de código markdown ` ```sql ... ``` `. Nunca deixe a query solta no meio do texto ou responda apenas com texto.
