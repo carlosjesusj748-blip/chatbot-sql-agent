@@ -512,6 +512,55 @@ def executar_analise_ml(df: pd.DataFrame, ml_config: dict):
         return {"stats": f"⚠️ Não foi possível concluir a análise estatística: {e}", "figura": None}
 
 
+def _diagnosticar_zero_resultados(sql_query: str, engine) -> str:
+    """
+    Quando uma query retorna 0 resultados, tenta diagnosticar qual filtro
+    do WHERE é o responsável. Faz isso removendo cada condição AND uma por vez
+    e verificando se o COUNT(*) resultante é > 0.
+    Retorna uma string descritiva para injetar no contexto de erro do LLM.
+    """
+    try:
+        # Extrair a parte do WHERE
+        where_match = re.search(r'WHERE\s+(.*?)(?:GROUP BY|ORDER BY|LIMIT|$)', sql_query, re.DOTALL | re.IGNORECASE)
+        if not where_match:
+            return "Não foi possível identificar os filtros WHERE."
+
+        where_clause = where_match.group(1).strip()
+
+        # Separar as condições AND (simplificado)
+        condicoes = re.split(r'\bAND\b', where_clause, flags=re.IGNORECASE)
+        condicoes = [c.strip().rstrip(',') for c in condicoes if c.strip()]
+
+        if len(condicoes) <= 1:
+            return f"Há apenas um filtro: '{where_clause}'. Verifique se o valor dele existe na tabela."
+
+        # Extrair a parte FROM...JOIN...WHERE (preservando aliases)
+        from_match = re.search(r'(FROM\s+.*?)WHERE', sql_query, re.DOTALL | re.IGNORECASE)
+        if not from_match:
+            return "Não foi possível extrair o FROM/JOIN da query."
+
+        from_clause = from_match.group(1).strip()
+
+        diagnosticos = []
+        for i, cond in enumerate(condicoes):
+            # Remove a condição i e monta um COUNT(*) com as restantes
+            filtros_restantes = [c for j, c in enumerate(condicoes) if j != i]
+            novo_where = " AND ".join(filtros_restantes)
+            query_teste = f"SELECT COUNT(*) AS total {from_clause} WHERE {novo_where}"
+
+            try:
+                resultado = pd.read_sql(query_teste, engine)
+                total = resultado['total'].iloc[0] if not resultado.empty else 0
+                diagnosticos.append(f"Sem o filtro '{cond.strip()}': {total} linhas")
+            except Exception:
+                diagnosticos.append(f"Sem o filtro '{cond.strip()}': [erro ao testar]")
+
+        return " | ".join(diagnosticos)
+
+    except Exception as e:
+        return f"Erro ao diagnosticar: {str(e)}"
+
+
 def ask(question: str) -> dict:
     """
     Nova arquitetura Chain:
@@ -535,11 +584,11 @@ def ask(question: str) -> dict:
 
         tabelas_contexto = BASE_TABLE + "\n" + TABLE_SCHEMAS_MAP[tema]
 
-        # 1. Geração SQL com Loop de Validação
-        max_tentativas = 3
+        # 1. Geração SQL com Loop de Validação + Execução Unificados
+        max_tentativas = 4
         sql_query = ""
         erro_anterior = ""
-        sucesso = False
+        df = None
 
         for tentativa in range(max_tentativas):
             contexto_erro = (
@@ -562,23 +611,46 @@ def ask(question: str) -> dict:
                 erro_anterior = "A resposta do modelo veio vazia."
                 continue
 
-            sucesso, msg = validar_query_bigquery(sql_query)
-            if sucesso:
-                break
+            # Passo A: Dry Run (valida sintaxe e schema)
+            valido, msg_validacao = validar_query_bigquery(sql_query)
+            if not valido:
+                erro_anterior = msg_validacao
+                continue
+
+            # Passo B: Execução real
+            try:
+                df = pd.read_sql(sql_query, engine)
+            except Exception as e:
+                erro_anterior = f"Erro de execução: {str(e)}"
+                continue
+
+            # Passo C: Verifica se retornou dados
+            if df.empty:
+                # Diagnóstico inteligente: tenta descobrir qual filtro zerou
+                diagnostico = _diagnosticar_zero_resultados(sql_query, engine)
+                erro_anterior = (
+                    "A query é sintaticamente válida, mas retornou 0 resultados. "
+                    f"Diagnóstico dos filtros: {diagnostico} "
+                    "Reconsidere os filtros do WHERE. "
+                    "DICA: tente usar a tabela `basedosdados.br_fbsp_absp.municipio` com a coluna `homicidio_doloso` em vez do DATASUS, "
+                    "ou use REGEXP_CONTAINS(causa_basica, r'^(X8[5-9]|X9[0-9]|Y0[0-9])') em vez de circunstancia_obito = '3'. "
+                    "Tente também um ano anterior (2021, 2020) ou use uma subquery com MAX(ano)."
+                )
+                df = None
+                continue
             else:
-                erro_anterior = msg
+                break  # Sucesso! Temos dados.
 
-        if not sucesso:
-            return {"error": f"**Falha ao gerar SQL válido após {max_tentativas} tentativas.**\nÚltimo erro: {erro_anterior}\n\n**Última Query Gerada:**\n```sql\n{sql_query}\n```"}
-
-        # 2. Execução
-        try:
-            df = pd.read_sql(sql_query, engine)
-        except Exception as e:
-            return {"error": f"**Erro ao executar SQL no banco:** {str(e)}\n\n**Query Gerada:**\n```sql\n{sql_query}\n```"}
-
-        if df.empty:
-            return {"error": "A consulta retornou 0 resultados.", "sql": sql_query}
+        # Se esgotou tentativas
+        if df is None or df.empty:
+            return {
+                "error": (
+                    f"**Falha ao obter dados válidos após {max_tentativas} tentativas.**\n"
+                    f"Último problema: {erro_anterior}\n\n"
+                    f"**Última Query Gerada:**\n```sql\n{sql_query}\n```"
+                ),
+                "sql": sql_query
+            }
 
         # 3. Análise
         data_sample = _dataframe_para_texto(df.head(20))
