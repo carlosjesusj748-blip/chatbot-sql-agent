@@ -233,6 +233,7 @@ def render_message(msg_content, msg_idx=0):
                 )
             with col2:
                 import io
+                import pandas as pd
                 buffer = io.BytesIO()
                 try:
                     with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
@@ -259,6 +260,7 @@ def render_message(msg_content, msg_idx=0):
                 st.caption(ml.get("reason", ""))
                 
                 try:
+                    import pandas as pd
                     if ml_task == "summary":
                         st.write("Estatística Descritiva:")
                         st.dataframe(df.describe())
@@ -276,7 +278,9 @@ def render_message(msg_content, msg_idx=0):
                         from sklearn.cluster import KMeans
                         # Remover nulos para o modelo
                         df_clean = df.dropna(subset=[x_col, y_col]).copy()
-                        if len(df_clean) > 0:
+                        if not pd.api.types.is_numeric_dtype(df_clean[x_col]) or not pd.api.types.is_numeric_dtype(df_clean[y_col]):
+                            st.warning("O K-Means requer que as colunas X e Y sejam numéricas.")
+                        elif len(df_clean) > 0:
                             k = int(ml.get("k", 3))
                             kmeans = KMeans(n_clusters=k, random_state=42, n_init=10)
                             df_clean['cluster'] = kmeans.fit_predict(df_clean[[x_col, y_col]])
@@ -285,9 +289,10 @@ def render_message(msg_content, msg_idx=0):
                             
                     elif ml_task == "regression" and x_col and y_col:
                         import numpy as np
-                        import pandas as pd
                         df_clean = df.dropna(subset=[x_col, y_col]).copy()
-                        if len(df_clean) > 1:
+                        if not pd.api.types.is_numeric_dtype(df_clean[x_col]) or not pd.api.types.is_numeric_dtype(df_clean[y_col]):
+                            st.warning("A regressão linear requer que ambas as colunas (X e Y) sejam numéricas.")
+                        elif len(df_clean) > 1:
                             x = df_clean[x_col].values
                             y = df_clean[y_col].values
                             # Regressão linear simples (grau 1)
