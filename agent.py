@@ -253,6 +253,11 @@ def validar_query_bigquery(query_sql):
         query_job = client.query(query_sql, job_config=job_config)
         bytes_processados = query_job.total_bytes_processed or 0
         mb_processados = bytes_processados / (1024 * 1024)
+        
+        # Limite rígido de custos de 1 GB
+        if mb_processados > 1024:
+            return False, f"A consulta processaria {mb_processados:.2f} MB, excedendo o limite de segurança de 1024 MB (1 GB). Simplifique a query usando filtros mais restritivos."
+            
         return True, f"Query válida! Processaria {mb_processados:.2f} MB."
     except BadRequest as e:
         return False, e.message
@@ -416,7 +421,18 @@ def _validar_tabelas_permitidas(sql: str, tabelas_permitidas: list):
     na lista de tabelas fornecida ao LLM. Se ele inventar uma tabela fora da
     lista, pegamos isso ANTES de gastar uma chamada de dry run/execução.
     """
+    # NOVO: Anti-DML / Operações destrutivas
+    padroes_proibidos = [r"\bINSERT\b", r"\bUPDATE\b", r"\bDELETE\b", r"\bDROP\b", r"\bALTER\b", r"\bGRANT\b", r"\bTRUNCATE\b", r"\bREPLACE\b", r"\bMERGE\b"]
+    for padrao in padroes_proibidos:
+        if re.search(padrao, sql, re.IGNORECASE):
+            return False, "Operação bloqueada por segurança. O assistente só tem permissão para ler dados (SELECT)."
+
+    # NOVO: Restrição de Dataset (Gaiola)
     usadas = set(re.findall(r"`([\w]+\.[\w]+\.[\w]+)`", sql))
+    for t in usadas:
+        if not t.startswith("basedosdados."):
+            return False, f"Acesso negado: a tabela `{t}` está fora do projeto público 'basedosdados'. Consultas a outros projetos são bloqueadas por segurança."
+
     nao_permitidas = usadas - set(tabelas_permitidas)
     if nao_permitidas:
         return False, (
