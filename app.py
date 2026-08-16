@@ -244,8 +244,8 @@ def render_message(msg_content, msg_idx=0):
                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                         key=f"dl_xls_{msg_idx}"
                     )
-                except ImportError:
-                    st.warning("Para exportar em Excel, instale openpyxl.")
+                except Exception as e:
+                    st.warning(f"Aviso: Não foi possível gerar arquivo Excel. Erro: {str(e)}")
             
             # 4. Machine Learning & Gráfico
             ml = msg_content.get("ml_config", {})
