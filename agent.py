@@ -73,8 +73,8 @@ Sempre que utilizar as tabelas abaixo, RESPEITE ESTRITAMENTE os nomes das coluna
    - Chave: `id_municipio`
    - Nomes: `nome`, `sigla_uf`
 3. `basedosdados.br_fbsp_absp.municipio` (Segurança Pública/Anuário)
-   - Chave: `id_municipio`
-   - Métricas: `homicidio_doloso`, `latrocinio`
+   - Chave: `id_municipio`, `ano`
+   - ATENÇÃO: Antes de usar esta tabela, se não tiver certeza dos nomes das colunas de métricas, rode uma subquery: SELECT column_name FROM `basedosdados.br_fbsp_absp.INFORMATION_SCHEMA.COLUMNS` WHERE table_name = 'municipio' para descobrir os nomes exatos.
 
 ### REGRA DE FORMATAÇÃO DA SAÍDA
 Sempre que gerar uma query SQL, você DEVE encapsulá-la em um bloco de código markdown ` ```sql ... ``` `. Nunca deixe a query solta no meio do texto ou responda apenas com texto.
@@ -632,9 +632,9 @@ def ask(question: str) -> dict:
                     "A query é sintaticamente válida, mas retornou 0 resultados. "
                     f"Diagnóstico dos filtros: {diagnostico} "
                     "Reconsidere os filtros do WHERE. "
-                    "DICA: tente usar a tabela `basedosdados.br_fbsp_absp.municipio` com a coluna `homicidio_doloso` em vez do DATASUS, "
-                    "ou use REGEXP_CONTAINS(causa_basica, r'^(X8[5-9]|X9[0-9]|Y0[0-9])') em vez de circunstancia_obito = '3'. "
-                    "Tente também um ano anterior (2021, 2020) ou use uma subquery com MAX(ano)."
+                    "DICA 1: Se usou circunstancia_obito = '3', troque por REGEXP_CONTAINS(causa_basica, r'^(X8[5-9]|X9[0-9]|Y0[0-9])'). "
+                    "DICA 2: Se usou br_ms_sim.microdados e não deu resultado, tente a tabela `basedosdados.br_fbsp_absp.municipio` (use SUM sobre as colunas de métricas disponíveis). "
+                    "DICA 3: Tente um ano anterior (2021, 2020) ou use uma subquery com MAX(ano) para achar o ano mais recente disponível."
                 )
                 df = None
                 continue
@@ -686,6 +686,76 @@ def ask(question: str) -> dict:
 
     except Exception as e:
         return {"error": f"❌ Erro inesperado: {str(e)}"}
+
+
+# ── Palavras-chave que indicam pedido de análise/follow-up ──────────
+_KEYWORDS_ANALISE = [
+    "kmeans", "k-means", "regressão", "regressao", "correlação", "correlacao",
+    "sumarização", "sumarizacao", "resumo", "resumir", "summary",
+    "outlier", "distribuição", "distribuicao", "histograma",
+    "gráfico", "grafico", "plotar", "plottar", "chart",
+    "tendência", "tendencia", "série temporal", "serie temporal",
+    "agora faça", "agora faca", "agora mostre", "agora analise",
+    "com esses dados", "desses dados", "dos mesmos dados",
+    "mesma base", "mesma tabela", "mesmos dados",
+    "refaça", "refaca", "repita", "de novo",
+]
+
+
+def is_followup_analysis(question: str) -> bool:
+    """Detecta se a pergunta parece um pedido de análise/follow-up sobre dados já carregados."""
+    q = question.lower()
+    return any(kw in q for kw in _KEYWORDS_ANALISE)
+
+
+def analyze_cached(question: str, df: pd.DataFrame, sql_original: str = "") -> dict:
+    """
+    Reutiliza um DataFrame já carregado (do cache da sessão) para gerar
+    nova análise textual + ML/gráfico, SEM consultar o BigQuery novamente.
+    Economiza tempo, custo e evita erros de SQL em perguntas de follow-up.
+    """
+    try:
+        llm = get_llm()
+
+        data_sample = _dataframe_para_texto(df.head(20))
+
+        # Análise textual
+        prompt_analysis = ChatPromptTemplate.from_template(ANALYSIS_PROMPT)
+        chain_analysis = prompt_analysis | llm | StrOutputParser()
+        analysis = chain_analysis.invoke({
+            "question": question,
+            "sql": sql_original or "(dados reutilizados da consulta anterior)",
+            "data": data_sample
+        })
+
+        # ML & Gráfico
+        prompt_ml = ChatPromptTemplate.from_template(ML_PROMPT)
+        chain_ml = prompt_ml | llm | StrOutputParser()
+        ml_json_str = chain_ml.invoke({"question": question, "data": data_sample})
+
+        ml_config = dict(ML_CONFIG_DEFAULTS)
+        try:
+            match = re.search(r'\{.*\}', ml_json_str, re.DOTALL)
+            if match:
+                parsed = json.loads(match.group())
+                ml_config.update(parsed)
+        except Exception:
+            pass
+
+        analise_ml = executar_analise_ml(df, ml_config)
+
+        return {
+            "sql": sql_original or "(dados reutilizados do cache)",
+            "dataframe": df,
+            "analysis": analysis,
+            "ml_config": ml_config,
+            "estatisticas": analise_ml["stats"],
+            "figura": analise_ml["figura"],
+            "from_cache": True,
+        }
+
+    except Exception as e:
+        return {"error": f"❌ Erro inesperado na análise em cache: {str(e)}"}
 
 
 if __name__ == "__main__":

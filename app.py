@@ -330,8 +330,24 @@ if prompt := st.chat_input("Digite sua pergunta sobre os dados..."):
     with st.chat_message("assistant", avatar="🤖"):
         with st.spinner("🔄 Analisando sua pergunta, processando SQL e gerando insights..."):
             try:
-                from agent import ask
-                response = ask(prompt)
+                from agent import ask, analyze_cached, is_followup_analysis
+
+                # Verifica se é um pedido de follow-up e se há dados em cache
+                cached_df = st.session_state.get("last_dataframe")
+                cached_sql = st.session_state.get("last_sql", "")
+
+                if cached_df is not None and is_followup_analysis(prompt):
+                    # Reutiliza os dados já baixados — sem consultar o BigQuery!
+                    response = analyze_cached(prompt, cached_df, cached_sql)
+                else:
+                    # Nova consulta completa ao BigQuery
+                    response = ask(prompt)
+
+                # Salva cache se a resposta foi bem-sucedida
+                if isinstance(response, dict) and "dataframe" in response:
+                    st.session_state["last_dataframe"] = response["dataframe"]
+                    st.session_state["last_sql"] = response.get("sql", "")
+
             except ValueError as ve:
                 response = {"error": str(ve)}
             except Exception as e:
