@@ -9,6 +9,7 @@ import os
 import re
 import json
 import difflib
+import io
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -27,21 +28,19 @@ from google.api_core.exceptions import BadRequest
 PROJECT_ID = "alert-palace-504123-t8"
 
 ROUTER_PROMPT = """Você é um assistente de roteamento.
-Classifique a pergunta do usuário em APENAS UM dos seguintes temas: economia, educacao, saude, trabalho, seguranca, geografia, meio_ambiente, financas ou geral.
+Classifique a pergunta do usuário em APENAS UM dos seguintes temas: economia, educacao, saude, trabalho, seguranca, geografia ou geral.
 Responda APENAS com o nome do tema, sem pontuação ou explicação.
 Pergunta: {question}
 Tema:"""
 
 TABLE_SCHEMAS_MAP = {
-    "economia": "1. IBGE PIB: `basedosdados.br_ibge_pib.municipio`\n\nEXEMPLO DE QUERY (Ranking de PIB Municipal):\n```sql\nWITH ano_recente AS (SELECT MAX(ano) as ano FROM `basedosdados.br_ibge_pib.municipio`) SELECT m.nome AS municipio, p.pib AS pib_total FROM `basedosdados.br_ibge_pib.municipio` p JOIN ano_recente a ON p.ano = a.ano JOIN `basedosdados.br_bd_diretorios_brasil.municipio` m ON p.id_municipio = m.id_municipio WHERE m.sigla_uf = 'SP' ORDER BY pib_total DESC LIMIT 10\n```",
-    "educacao": "1. INEP IDEB Escola: `basedosdados.br_inep_ideb.escola`\n\nEXEMPLO DE QUERY (Piores médias do IDEB):\n```sql\nWITH ano_recente AS (SELECT MAX(ano) as ano FROM `basedosdados.br_inep_ideb.escola`) SELECT m.nome AS municipio, AVG(e.nota_ideb) AS media_ideb FROM `basedosdados.br_inep_ideb.escola` e JOIN ano_recente a ON e.ano = a.ano JOIN `basedosdados.br_bd_diretorios_brasil.municipio` m ON e.id_municipio = m.id_municipio WHERE m.sigla_uf = 'BA' GROUP BY m.nome ORDER BY media_ideb ASC LIMIT 10\n```",
-    "saude": "1. SIM DataSUS (Mortalidade): `basedosdados.br_ms_sim.microdados`\n\nEXEMPLO DE QUERY (Mortalidade Infantil):\n```sql\nWITH ano_recente AS (SELECT MAX(ano) as ano FROM `basedosdados.br_ms_sim.microdados`), obitos_infantis AS (SELECT id_municipio_ocorrencia, COUNT(*) AS total_obitos FROM `basedosdados.br_ms_sim.microdados` s JOIN ano_recente a ON s.ano = a.ano WHERE s.idade_obito < 365 GROUP BY id_municipio_ocorrencia) SELECT m.nome AS municipio, o.total_obitos FROM obitos_infantis o JOIN `basedosdados.br_bd_diretorios_brasil.municipio` m ON o.id_municipio_ocorrencia = m.id_municipio WHERE m.sigla_uf = 'BA' ORDER BY o.total_obitos DESC LIMIT 10\n```",
-    "trabalho": "1. RAIS (Empregos): `basedosdados.br_me_rais.microdados_estabelecimentos`\n2. CAGED: `basedosdados.br_me_caged.microdados_movimentacao`\n\nEXEMPLO DE QUERY (Total de Empregos RAIS):\n```sql\nWITH ano_recente AS (SELECT MAX(ano) as ano FROM `basedosdados.br_me_rais.microdados_estabelecimentos`) SELECT m.nome AS municipio, SUM(r.qtde_vinculos_ativos) AS total_empregos FROM `basedosdados.br_me_rais.microdados_estabelecimentos` r JOIN ano_recente a ON r.ano = a.ano JOIN `basedosdados.br_bd_diretorios_brasil.municipio` m ON r.id_municipio = m.id_municipio WHERE m.sigla_uf = 'BA' GROUP BY m.nome ORDER BY total_empregos DESC LIMIT 10\n```",
-    "seguranca": "1. ABSP Município (Nacional): `basedosdados.br_fbsp_absp.municipio`\n\nEXEMPLO DE QUERY (Municípios Mais Violentos ABSP):\n```sql\nWITH ano_recente AS (SELECT MAX(ano) as ano FROM `basedosdados.br_fbsp_absp.municipio`), homicidios AS (SELECT id_municipio, SUM(quantidade_homicidio_doloso) AS total_homicidios FROM `basedosdados.br_fbsp_absp.municipio` f JOIN ano_recente a ON f.ano = a.ano GROUP BY id_municipio) SELECT m.nome AS municipio, h.total_homicidios FROM homicidios h JOIN `basedosdados.br_bd_diretorios_brasil.municipio` m ON h.id_municipio = m.id_municipio WHERE m.sigla_uf = 'BA' ORDER BY h.total_homicidios DESC LIMIT 10\n```",
-    "meio_ambiente": "1. PRODES/INPE (Desmatamento): `basedosdados.br_inpe_prodes.municipio`\n\nEXEMPLO DE QUERY (Desmatamento):\n```sql\nWITH ano_recente AS (SELECT MAX(ano) as ano FROM `basedosdados.br_inpe_prodes.municipio`) SELECT m.nome AS municipio, SUM(d.area_desmatada) AS total_desmatado FROM `basedosdados.br_inpe_prodes.municipio` d JOIN ano_recente a ON d.ano = a.ano JOIN `basedosdados.br_bd_diretorios_brasil.municipio` m ON d.id_municipio = m.id_municipio WHERE m.sigla_uf = 'BA' GROUP BY m.nome ORDER BY total_desmatado DESC LIMIT 10\n```",
-    "financas": "1. Finbra Tesouro (Receitas): `basedosdados.br_tesouro_finbra.receitas_orcamentarias`\n\nEXEMPLO DE QUERY (Receita Orçamentária):\n```sql\nWITH ano_recente AS (SELECT MAX(ano) as ano FROM `basedosdados.br_tesouro_finbra.receitas_orcamentarias`) SELECT m.nome AS municipio, SUM(f.valor_receita) AS total_receita FROM `basedosdados.br_tesouro_finbra.receitas_orcamentarias` f JOIN ano_recente a ON f.ano = a.ano JOIN `basedosdados.br_bd_diretorios_brasil.municipio` m ON f.id_municipio = m.id_municipio WHERE m.sigla_uf = 'BA' GROUP BY m.nome ORDER BY total_receita DESC LIMIT 10\n```",
-    "geografia": "1. Diretório Municípios: `basedosdados.br_bd_diretorios_brasil.municipio`\n2. Diretório UF: `basedosdados.br_bd_diretorios_brasil.uf`\n\nEXEMPLO DE QUERY:\n```sql\nSELECT m.nome, m.sigla_uf, u.regiao FROM `basedosdados.br_bd_diretorios_brasil.municipio` m JOIN `basedosdados.br_bd_diretorios_brasil.uf` u ON m.sigla_uf = u.sigla WHERE u.regiao = 'Nordeste'\n```",
-    "geral": "1. Diretório Municípios: `basedosdados.br_bd_diretorios_brasil.municipio`\n2. IBGE População: `basedosdados.br_ibge_populacao.municipio`\n\nEXEMPLO DE QUERY (Cidades mais populosas):\n```sql\nWITH ano_recente AS (SELECT MAX(ano) as ano FROM `basedosdados.br_ibge_populacao.municipio`) SELECT m.nome AS municipio, p.populacao FROM `basedosdados.br_ibge_populacao.municipio` p JOIN ano_recente a ON p.ano = a.ano JOIN `basedosdados.br_bd_diretorios_brasil.municipio` m ON p.id_municipio = m.id_municipio WHERE m.sigla_uf = 'SP' ORDER BY p.populacao DESC LIMIT 10\n```"
+    "economia": "1. IBGE PIB: `basedosdados.br_ibge_pib.municipio`\n2. IBGE IPCA: `basedosdados.br_ibge_ipca.mes_brasil`",
+    "educacao": "1. INEP Censo Escolar: `basedosdados.br_inep_censo_escolar.escola`",
+    "saude": "1. SIM DataSUS (Mortalidade): `basedosdados.br_ms_sim.microdados` (colunas cruciais: ano, sigla_uf, id_municipio_ocorrencia, id_municipio_residencia, circunstancia_obito)",
+    "trabalho": "1. Novo CAGED: `basedosdados.br_me_caged.microdados_movimentacao`\n2. RAIS: `basedosdados.br_me_rais.microdados_vinculos`",
+    "seguranca": "1. ABSP Município: `basedosdados.br_fbsp_absp.municipio`\n2. ABSP UF: `basedosdados.br_fbsp_absp.uf`\n3. Ocorrências SP: `basedosdados.br_sp_gov_ssp.ocorrencias_registradas`",
+    "geografia": "1. Municípios: `basedosdados.br_bd_diretorios_brasil.municipio`\n2. UF: `basedosdados.br_bd_diretorios_brasil.uf`\n3. Setor Censitário: `basedosdados.br_bd_diretorios_brasil.setor_censitario`",
+    "geral": "1. IBGE População: `basedosdados.br_ibge_populacao.municipio`\n2. Eleições TSE: `basedosdados.br_tse_eleicoes.resultados_candidato_municipio`"
 }
 
 BASE_TABLE = "0. Diretório de Municípios: `basedosdados.br_bd_diretorios_brasil.municipio` (colunas: id_municipio, nome, sigla_uf). Diretório de UFs: `basedosdados.br_bd_diretorios_brasil.uf`. FAÇA JOIN com diretórios sempre que precisar dos nomes em texto em vez de IDs."
@@ -75,20 +74,14 @@ Sempre que utilizar as tabelas abaixo, RESPEITE ESTRITAMENTE os nomes das coluna
    - Chave: `id_municipio`
    - Nomes: `nome`, `sigla_uf`
 3. `basedosdados.br_fbsp_absp.municipio` (Segurança Pública/Anuário)
-   - Chaves: `ano`, `sigla_uf`, `id_municipio`, `grupo`
-   - ATENÇÃO: Todas as métricas usam o prefixo `quantidade_`. Os nomes corretos são:
-     * `quantidade_homicidio_doloso` (homicídios dolosos)
-     * `quantidade_mortes_violentas_intencionais` (MVI / CVLI total)
-     * `quantidade_latrocinio` (latrocínio)
-     * `quantidade_lesao_corporal_morte` (lesão corporal seguida de morte)
-     * `quantidade_feminicidio` (feminicídio)
-     * `quantidade_estupro` (estupro)
-     * `quantidade_furto_veiculos`, `quantidade_roubo_veiculos`
-     * `quantidade_mortes_intervencao_policial`
-   - NUNCA use `homicidio_doloso` sem o prefixo `quantidade_`.
+   - Chave: `id_municipio`
+   - Métricas: `homicidio_doloso`, `latrocinio`
 
 ### REGRA DE FORMATAÇÃO DA SAÍDA
 Sempre que gerar uma query SQL, você DEVE encapsulá-la em um bloco de código markdown ` ```sql ... ``` `. Nunca deixe a query solta no meio do texto ou responda apenas com texto.
+
+### REGRA CRÍTICA — SCHEMA REAL VERIFICADO
+Se o contexto abaixo contiver uma seção "SCHEMA REAL VERIFICADO NO BIGQUERY", ela é a fonte da verdade e tem prioridade sobre qualquer suposição. Use SOMENTE as tabelas e colunas ali listadas. NUNCA use uma tabela que não esteja explicitamente no mapa de tabelas fornecido — mesmo que você "lembre" de uma tabela parecida do treinamento, ela pode não existir neste projeto ou ter outro nome/schema.
 
 Aqui está o mapa de tabelas que você DEVE usar para responder a pergunta:
 {tabelas_contexto}
@@ -227,6 +220,168 @@ def validar_query_bigquery(query_sql):
         return False, e.message
 
 
+def _extrair_from_where(sql: str):
+    """Extrai o bloco bruto FROM...JOIN...WHERE (até GROUP BY/ORDER BY/LIMIT), preservando joins e aliases."""
+    match = re.search(r"(FROM\s+.*?)(?:\bGROUP BY\b|\bORDER BY\b|\bLIMIT\b|$)", sql, re.IGNORECASE | re.DOTALL)
+    return match.group(1).strip() if match else None
+
+
+def _extrair_where(sql: str):
+    """Extrai o texto da cláusula WHERE (até GROUP BY / ORDER BY / LIMIT ou o fim da query)."""
+    match = re.search(r"WHERE\s+(.*?)(?:\bGROUP BY\b|\bORDER BY\b|\bLIMIT\b|$)", sql, re.IGNORECASE | re.DOTALL)
+    return match.group(1).strip() if match else None
+
+
+def _extrair_filtros_igualdade(where_clause: str):
+    """
+    Encontra filtros do tipo `coluna = 'valor'` dentro da cláusula WHERE.
+    Mantém a referência qualificada (ex: 'm.circunstancia_obito') para reuso seguro
+    em queries com JOIN, e também o nome puro da coluna (sem alias) para exibição.
+    """
+    if not where_clause:
+        return []
+    padrao = re.compile(r"([\w.]+)\s*=\s*'([^']*)'")
+    encontrados = []
+    for m in padrao.finditer(where_clause):
+        coluna_qualificada = m.group(1)
+        coluna_pura = coluna_qualificada.split(".")[-1]
+        valor = m.group(2)
+        encontrados.append((coluna_pura, coluna_qualificada, valor, m.group(0)))
+    return encontrados
+
+
+def _investigar_valores_reais(sql_query: str, max_colunas: int = 2) -> str:
+    """
+    Quando uma query roda sem erro mas volta com 0 linhas, investiga os valores
+    reais de até `max_colunas` colunas usadas em filtros de igualdade (ex:
+    circunstancia_obito = '3'), contando ocorrências dentro do MESMO recorte —
+    reaproveitando o FROM/JOIN/WHERE originais e só neutralizando a condição
+    suspeita (troca por TRUE), para não quebrar joins nem aliases.
+    Retorna um texto pronto para o prompt de correção, ou "" se nada for encontrado.
+    """
+    from_where = _extrair_from_where(sql_query)
+    where_clause = _extrair_where(sql_query)
+    if not from_where or not where_clause:
+        return ""
+
+    # colunas "seguras" que raramente são a causa (já sabemos que existem e têm o valor certo)
+    colunas_ignoradas = {"ano", "sigla_uf", "sigla"}
+    filtros = [f for f in _extrair_filtros_igualdade(where_clause) if f[0].lower() not in colunas_ignoradas]
+    if not filtros:
+        return ""
+
+    achados = []
+    try:
+        client = bigquery.Client(project=PROJECT_ID)
+    except Exception:
+        return ""
+
+    for coluna_pura, coluna_qualificada, valor_usado, trecho_original in filtros[:max_colunas]:
+        from_where_sem_essa_condicao = from_where.replace(trecho_original, "TRUE", 1)
+        query_diagnostico = (
+            f"SELECT {coluna_qualificada} AS valor, COUNT(*) AS total "
+            f"{from_where_sem_essa_condicao} "
+            f"GROUP BY valor ORDER BY total DESC LIMIT 10"
+        )
+        try:
+            job_config = bigquery.QueryJobConfig(use_query_cache=True)
+            resultado = client.query(query_diagnostico, job_config=job_config).result()
+            valores = [(row["valor"], row["total"]) for row in resultado]
+            if valores:
+                achados.append(
+                    f"- Coluna `{coluna_pura}` (você usou o valor '{valor_usado}', que não existe nesse recorte). "
+                    f"Valores reais encontrados (valor, contagem): {valores}"
+                )
+        except Exception:
+            continue  # se o diagnóstico falhar por qualquer motivo, apenas ignora essa coluna
+
+    if not achados:
+        return ""
+    return (
+        "\nInvestigação automática dos filtros — a query rodou sem erro de sintaxe mas "
+        "retornou 0 linhas. Prováveis valores de filtro incorretos:\n" + "\n".join(achados) +
+        "\nCorrija a query usando um dos valores reais listados acima (ou remova o filtro se não fizer sentido)."
+    )
+
+
+# Cache em memória: evita repetir a mesma consulta de metadados (INFORMATION_SCHEMA)
+# várias vezes na mesma sessão do app.
+_CACHE_SCHEMA_TABELAS = {}
+
+
+def _extrair_tabelas_do_texto(texto: str) -> list:
+    """Extrai todos os nomes de tabela no formato `projeto.dataset.tabela` de um texto."""
+    return re.findall(r"`([\w]+\.[\w]+\.[\w]+)`", texto)
+
+
+def _obter_colunas_tabela(tabela_completa: str) -> list:
+    """
+    Busca as colunas REAIS de uma tabela via INFORMATION_SCHEMA.COLUMNS do BigQuery
+    (consulta de metadados, praticamente sem custo de processamento). Resultado fica
+    em cache na sessão. Retorna [] se a tabela não existir ou a consulta falhar.
+    """
+    if tabela_completa in _CACHE_SCHEMA_TABELAS:
+        return _CACHE_SCHEMA_TABELAS[tabela_completa]
+
+    partes = tabela_completa.split(".")
+    if len(partes) != 3:
+        return []
+    projeto, dataset, tabela = partes
+
+    query = f"""
+        SELECT column_name
+        FROM `{projeto}.{dataset}`.INFORMATION_SCHEMA.COLUMNS
+        WHERE table_name = '{tabela}'
+        ORDER BY ordinal_position
+    """
+    try:
+        client = bigquery.Client(project=PROJECT_ID)
+        resultado = client.query(query).result()
+        colunas = [row["column_name"] for row in resultado]
+        _CACHE_SCHEMA_TABELAS[tabela_completa] = colunas
+        return colunas
+    except Exception:
+        return []
+
+
+def _enriquecer_contexto_com_schema_real(tabelas_contexto_texto: str) -> str:
+    """
+    Acrescenta ao texto de contexto das tabelas a lista REAL de colunas de cada
+    uma (via INFORMATION_SCHEMA), reduzindo a chance do LLM inventar nomes de
+    coluna que não existem. Mantém o texto original intacto e só adiciona uma
+    seção nova ao final.
+    """
+    tabelas = _extrair_tabelas_do_texto(tabelas_contexto_texto)
+    linhas_schema = []
+    for tabela in tabelas:
+        colunas = _obter_colunas_tabela(tabela)
+        if colunas:
+            linhas_schema.append(f"- `{tabela}`: {', '.join(colunas)}")
+    if not linhas_schema:
+        return tabelas_contexto_texto
+    return (
+        tabelas_contexto_texto
+        + "\n\n### SCHEMA REAL VERIFICADO NO BIGQUERY (fonte da verdade — use SOMENTE estas colunas)\n"
+        + "\n".join(linhas_schema)
+    )
+
+
+def _validar_tabelas_permitidas(sql: str, tabelas_permitidas: list):
+    """
+    Checagem rápida e sem custo: garante que a query só usa tabelas que estavam
+    na lista de tabelas fornecida ao LLM. Se ele inventar uma tabela fora da
+    lista, pegamos isso ANTES de gastar uma chamada de dry run/execução.
+    """
+    usadas = set(re.findall(r"`([\w]+\.[\w]+\.[\w]+)`", sql))
+    nao_permitidas = usadas - set(tabelas_permitidas)
+    if nao_permitidas:
+        return False, (
+            f"Você usou a(s) tabela(s) {sorted(nao_permitidas)}, que NÃO estão na lista de tabelas "
+            f"permitidas para esta pergunta. Use exclusivamente uma destas: {sorted(set(tabelas_permitidas))}."
+        )
+    return True, ""
+
+
 def _dataframe_para_texto(df: pd.DataFrame) -> str:
     """Converte o dataframe em texto para os prompts, sem depender de 'tabulate'."""
     try:
@@ -234,6 +389,38 @@ def _dataframe_para_texto(df: pd.DataFrame) -> str:
     except ImportError:
         # 'tabulate' não instalado — cai para uma representação simples em texto
         return df.to_string()
+
+
+def dataframe_para_xlsx(df: pd.DataFrame, estatisticas: str = None, sql: str = None) -> bytes:
+    """
+    Gera um arquivo .xlsx em memória (bytes), pronto para uso em
+    st.download_button. Coloca os dados na aba 'Dados' e, se houver,
+    o texto de estatísticas e a query SQL em abas separadas — assim o
+    usuário baixa tudo junto em vez de só a tabela crua.
+    """
+    buffer = io.BytesIO()
+    with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
+        df.to_excel(writer, sheet_name="Dados", index=False)
+
+        if estatisticas:
+            pd.DataFrame({"Estatísticas": estatisticas.split("\n")}).to_excel(
+                writer, sheet_name="Estatisticas", index=False
+            )
+
+        if sql:
+            pd.DataFrame({"Query SQL": sql.split("\n")}).to_excel(
+                writer, sheet_name="SQL", index=False
+            )
+
+        # Ajusta a largura das colunas na aba de dados para não ficar tudo cortado
+        from openpyxl.utils import get_column_letter
+        planilha = writer.sheets["Dados"]
+        for i, col in enumerate(df.columns):
+            largura = min(max(len(str(col)), df[col].astype(str).str.len().max() if len(df) else 0) + 2, 60)
+            planilha.column_dimensions[get_column_letter(i + 1)].width = largura
+
+    buffer.seek(0)
+    return buffer.getvalue()
 
 
 def _resolver_coluna(df: pd.DataFrame, nome_sugerido):
@@ -523,55 +710,6 @@ def executar_analise_ml(df: pd.DataFrame, ml_config: dict):
         return {"stats": f"⚠️ Não foi possível concluir a análise estatística: {e}", "figura": None}
 
 
-def _diagnosticar_zero_resultados(sql_query: str, engine) -> str:
-    """
-    Quando uma query retorna 0 resultados, tenta diagnosticar qual filtro
-    do WHERE é o responsável. Faz isso removendo cada condição AND uma por vez
-    e verificando se o COUNT(*) resultante é > 0.
-    Retorna uma string descritiva para injetar no contexto de erro do LLM.
-    """
-    try:
-        # Extrair a parte do WHERE
-        where_match = re.search(r'WHERE\s+(.*?)(?:GROUP BY|ORDER BY|LIMIT|$)', sql_query, re.DOTALL | re.IGNORECASE)
-        if not where_match:
-            return "Não foi possível identificar os filtros WHERE."
-
-        where_clause = where_match.group(1).strip()
-
-        # Separar as condições AND (simplificado)
-        condicoes = re.split(r'\bAND\b', where_clause, flags=re.IGNORECASE)
-        condicoes = [c.strip().rstrip(',') for c in condicoes if c.strip()]
-
-        if len(condicoes) <= 1:
-            return f"Há apenas um filtro: '{where_clause}'. Verifique se o valor dele existe na tabela."
-
-        # Extrair a parte FROM...JOIN...WHERE (preservando aliases)
-        from_match = re.search(r'(FROM\s+.*?)WHERE', sql_query, re.DOTALL | re.IGNORECASE)
-        if not from_match:
-            return "Não foi possível extrair o FROM/JOIN da query."
-
-        from_clause = from_match.group(1).strip()
-
-        diagnosticos = []
-        for i, cond in enumerate(condicoes):
-            # Remove a condição i e monta um COUNT(*) com as restantes
-            filtros_restantes = [c for j, c in enumerate(condicoes) if j != i]
-            novo_where = " AND ".join(filtros_restantes)
-            query_teste = f"SELECT COUNT(*) AS total {from_clause} WHERE {novo_where}"
-
-            try:
-                resultado = pd.read_sql(query_teste, engine)
-                total = resultado['total'].iloc[0] if not resultado.empty else 0
-                diagnosticos.append(f"Sem o filtro '{cond.strip()}': {total} linhas")
-            except Exception:
-                diagnosticos.append(f"Sem o filtro '{cond.strip()}': [erro ao testar]")
-
-        return " | ".join(diagnosticos)
-
-    except Exception as e:
-        return f"Erro ao diagnosticar: {str(e)}"
-
-
 def ask(question: str) -> dict:
     """
     Nova arquitetura Chain:
@@ -593,9 +731,15 @@ def ask(question: str) -> dict:
         if tema not in TABLE_SCHEMAS_MAP:
             tema = "geral"
 
-        tabelas_contexto = BASE_TABLE + "\n" + TABLE_SCHEMAS_MAP[tema]
+        tabelas_contexto_base = BASE_TABLE + "\n" + TABLE_SCHEMAS_MAP[tema]
+        tabelas_permitidas = _extrair_tabelas_do_texto(tabelas_contexto_base)
+        # Enriquece o contexto com o schema real de colunas (INFORMATION_SCHEMA),
+        # para reduzir alucinação de nomes de tabela/coluna que não existem.
+        tabelas_contexto = _enriquecer_contexto_com_schema_real(tabelas_contexto_base)
 
-        # 1. Geração SQL com Loop de Validação + Execução Unificados
+        # 1. Geração SQL + Execução, com loop de correção único.
+        # Trata: tabela fora da lista permitida, erros de sintaxe/schema (dry run),
+        # e queries válidas que rodam mas voltam com 0 linhas (filtro errado).
         max_tentativas = 4
         sql_query = ""
         erro_anterior = ""
@@ -603,9 +747,9 @@ def ask(question: str) -> dict:
 
         for tentativa in range(max_tentativas):
             contexto_erro = (
-                f"\nSua tentativa anterior falhou com este erro: {erro_anterior}\n"
+                f"\nSua tentativa anterior teve um problema: {erro_anterior}\n"
                 "Por favor, reescreva a query corrigindo o problema usando apenas as "
-                "colunas do schema fornecido e evite o erro."
+                "colunas do schema fornecido e evite repetir o mesmo erro."
                 if erro_anterior else ""
             )
 
@@ -620,47 +764,50 @@ def ask(question: str) -> dict:
 
             if not sql_query:
                 erro_anterior = "A resposta do modelo veio vazia."
+                df = None
                 continue
 
-            # Passo A: Dry Run (valida sintaxe e schema)
-            valido, msg_validacao = validar_query_bigquery(sql_query)
-            if not valido:
-                erro_anterior = msg_validacao
+            # Checagem barata (sem custo de BigQuery): a query só pode usar tabelas
+            # que estavam na lista fornecida — pega tabelas inventadas na hora, sem
+            # gastar uma tentativa de dry run/execução com elas.
+            tabelas_ok, msg_tabelas = _validar_tabelas_permitidas(sql_query, tabelas_permitidas)
+            if not tabelas_ok:
+                erro_anterior = msg_tabelas
+                df = None
                 continue
 
-            # Passo B: Execução real
+            sucesso, msg = validar_query_bigquery(sql_query)
+            if not sucesso:
+                erro_anterior = msg
+                df = None
+                continue
+
             try:
                 df = pd.read_sql(sql_query, engine)
             except Exception as e:
-                erro_anterior = f"Erro de execução: {str(e)}"
-                continue
-
-            # Passo C: Verifica se retornou dados
-            if df.empty:
-                # Diagnóstico inteligente: tenta descobrir qual filtro zerou
-                diagnostico = _diagnosticar_zero_resultados(sql_query, engine)
-                erro_anterior = (
-                    "A query é sintaticamente válida, mas retornou 0 resultados. "
-                    f"Diagnóstico dos filtros: {diagnostico} "
-                    "Reconsidere os filtros do WHERE. "
-                    "DICA 1: Se usou circunstancia_obito = '3', troque por REGEXP_CONTAINS(causa_basica, r'^(X8[5-9]|X9[0-9]|Y0[0-9])'). "
-                    "DICA 2: Se usou br_ms_sim.microdados e não deu resultado, tente a tabela `basedosdados.br_fbsp_absp.municipio` (use SUM sobre as colunas de métricas disponíveis). "
-                    "DICA 3: Tente um ano anterior (2021, 2020) ou use uma subquery com MAX(ano) para achar o ano mais recente disponível."
-                )
+                erro_anterior = str(e)
                 df = None
                 continue
-            else:
-                break  # Sucesso! Temos dados.
 
-        # Se esgotou tentativas
+            if df.empty:
+                dica_investigacao = _investigar_valores_reais(sql_query)
+                erro_anterior = (
+                    "A query é sintaticamente válida e rodou sem erros, mas retornou 0 linhas. "
+                    "Isso normalmente indica um valor de filtro incorreto (ex: um código categórico "
+                    "que não existe de fato nos dados)." + dica_investigacao
+                )
+                continue  # tenta de novo já com a dica do que corrigir
+
+            break  # sucesso: query válida e com resultados
+
         if df is None or df.empty:
             return {
                 "error": (
-                    f"**Falha ao obter dados válidos após {max_tentativas} tentativas.**\n"
+                    f"**Não foi possível obter resultados após {max_tentativas} tentativas.**\n"
                     f"Último problema: {erro_anterior}\n\n"
                     f"**Última Query Gerada:**\n```sql\n{sql_query}\n```"
                 ),
-                "sql": sql_query
+                "sql": sql_query,
             }
 
         # 3. Análise
@@ -697,76 +844,6 @@ def ask(question: str) -> dict:
 
     except Exception as e:
         return {"error": f"❌ Erro inesperado: {str(e)}"}
-
-
-# ── Palavras-chave que indicam pedido de análise/follow-up ──────────
-_KEYWORDS_ANALISE = [
-    "kmeans", "k-means", "regressão", "regressao", "correlação", "correlacao",
-    "sumarização", "sumarizacao", "resumo", "resumir", "summary",
-    "outlier", "distribuição", "distribuicao", "histograma",
-    "gráfico", "grafico", "plotar", "plottar", "chart",
-    "tendência", "tendencia", "série temporal", "serie temporal",
-    "agora faça", "agora faca", "agora mostre", "agora analise",
-    "com esses dados", "desses dados", "dos mesmos dados",
-    "mesma base", "mesma tabela", "mesmos dados",
-    "refaça", "refaca", "repita", "de novo",
-]
-
-
-def is_followup_analysis(question: str) -> bool:
-    """Detecta se a pergunta parece um pedido de análise/follow-up sobre dados já carregados."""
-    q = question.lower()
-    return any(kw in q for kw in _KEYWORDS_ANALISE)
-
-
-def analyze_cached(question: str, df: pd.DataFrame, sql_original: str = "") -> dict:
-    """
-    Reutiliza um DataFrame já carregado (do cache da sessão) para gerar
-    nova análise textual + ML/gráfico, SEM consultar o BigQuery novamente.
-    Economiza tempo, custo e evita erros de SQL em perguntas de follow-up.
-    """
-    try:
-        llm = get_llm()
-
-        data_sample = _dataframe_para_texto(df.head(20))
-
-        # Análise textual
-        prompt_analysis = ChatPromptTemplate.from_template(ANALYSIS_PROMPT)
-        chain_analysis = prompt_analysis | llm | StrOutputParser()
-        analysis = chain_analysis.invoke({
-            "question": question,
-            "sql": sql_original or "(dados reutilizados da consulta anterior)",
-            "data": data_sample
-        })
-
-        # ML & Gráfico
-        prompt_ml = ChatPromptTemplate.from_template(ML_PROMPT)
-        chain_ml = prompt_ml | llm | StrOutputParser()
-        ml_json_str = chain_ml.invoke({"question": question, "data": data_sample})
-
-        ml_config = dict(ML_CONFIG_DEFAULTS)
-        try:
-            match = re.search(r'\{.*\}', ml_json_str, re.DOTALL)
-            if match:
-                parsed = json.loads(match.group())
-                ml_config.update(parsed)
-        except Exception:
-            pass
-
-        analise_ml = executar_analise_ml(df, ml_config)
-
-        return {
-            "sql": sql_original or "(dados reutilizados do cache)",
-            "dataframe": df,
-            "analysis": analysis,
-            "ml_config": ml_config,
-            "estatisticas": analise_ml["stats"],
-            "figura": analise_ml["figura"],
-            "from_cache": True,
-        }
-
-    except Exception as e:
-        return {"error": f"❌ Erro inesperado na análise em cache: {str(e)}"}
 
 
 if __name__ == "__main__":
