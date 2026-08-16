@@ -220,15 +220,32 @@ def render_message(msg_content, msg_idx=0):
             df = msg_content.get("dataframe")
             st.dataframe(df, use_container_width=True)
             
-            # Botão de Download CSV
-            csv = df.to_csv(index=False).encode('utf-8')
-            st.download_button(
-                label="📥 Baixar Dados (CSV)",
-                data=csv,
-                file_name="dados_extracao.csv",
-                mime="text/csv",
-                key=f"download_{msg_idx}"
-            )
+            # Botões de Download
+            col1, col2 = st.columns(2)
+            with col1:
+                csv = df.to_csv(index=False).encode('utf-8')
+                st.download_button(
+                    label="📥 Baixar (CSV)",
+                    data=csv,
+                    file_name="dados_extracao.csv",
+                    mime="text/csv",
+                    key=f"dl_csv_{msg_idx}"
+                )
+            with col2:
+                import io
+                buffer = io.BytesIO()
+                try:
+                    with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+                        df.to_excel(writer, index=False, sheet_name='Dados')
+                    st.download_button(
+                        label="📊 Baixar (Excel)",
+                        data=buffer.getvalue(),
+                        file_name="dados_extracao.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        key=f"dl_xls_{msg_idx}"
+                    )
+                except ImportError:
+                    st.warning("Para exportar em Excel, instale openpyxl.")
             
             # 4. Machine Learning & Gráfico
             ml = msg_content.get("ml_config", {})

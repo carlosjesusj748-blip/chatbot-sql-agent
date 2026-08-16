@@ -11,3 +11,4 @@ tabulate
 scikit-learn
 seaborn
 google-cloud-bigquery
+openpyxl
