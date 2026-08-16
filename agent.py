@@ -846,6 +846,60 @@ def ask(question: str) -> dict:
         return {"error": f"❌ Erro inesperado: {str(e)}"}
 
 
+def is_followup_analysis(prompt: str) -> bool:
+    """Verifica se a pergunta do usuário é um pedido de nova análise/gráfico sobre os dados já extraídos."""
+    try:
+        llm = get_llm()
+        prompt_router = ChatPromptTemplate.from_template(
+            "O usuário enviou a mensagem: '{question}'. "
+            "Isso é um pedido para reanalisar os dados recém extraídos (ex: 'agrupe por', 'faça um grafico', 'qual a media disso', etc) "
+            "em vez de pedir dados de um novo assunto? "
+            "Responda APENAS 'sim' ou 'nao'."
+        )
+        chain = prompt_router | llm | StrOutputParser()
+        resp = chain.invoke({"question": prompt}).strip().lower()
+        return "sim" in resp
+    except:
+        return False
+
+
+def analyze_cached(question: str, df: pd.DataFrame, sql_query: str) -> dict:
+    """Faz a Análise IA e ML em cima de um dataframe cacheado, sem usar o BigQuery."""
+    try:
+        llm = get_llm()
+        data_sample = _dataframe_para_texto(df.head(20))
+        
+        prompt_analysis = ChatPromptTemplate.from_template(ANALYSIS_PROMPT)
+        chain_analysis = prompt_analysis | llm | StrOutputParser()
+        analysis = chain_analysis.invoke({"question": question, "sql": sql_query, "data": data_sample})
+
+        prompt_ml = ChatPromptTemplate.from_template(ML_PROMPT)
+        chain_ml = prompt_ml | llm | StrOutputParser()
+        ml_json_str = chain_ml.invoke({"question": question, "data": data_sample})
+
+        ml_config = dict(ML_CONFIG_DEFAULTS)
+        try:
+            match = re.search(r'\{.*\}', ml_json_str, re.DOTALL)
+            if match:
+                parsed = json.loads(match.group())
+                ml_config.update(parsed)
+        except Exception:
+            pass
+
+        analise_ml = executar_analise_ml(df, ml_config)
+
+        return {
+            "sql": sql_query,
+            "dataframe": df,
+            "analysis": analysis,
+            "ml_config": ml_config,
+            "estatisticas": analise_ml["stats"],
+            "figura": analise_ml["figura"],
+        }
+    except Exception as e:
+        return {"error": f"❌ Erro ao processar dados cacheados: {str(e)}"}
+
+
 if __name__ == "__main__":
     res = ask("Qual a população dos municípios de SP em 2022 segundo o IBGE?")
     print(res)
