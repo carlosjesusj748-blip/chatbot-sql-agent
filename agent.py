@@ -10,6 +10,7 @@ import re
 import json
 import difflib
 import io
+import time
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -26,6 +27,11 @@ from google.cloud import bigquery
 from google.api_core.exceptions import BadRequest
 
 PROJECT_ID = "alert-palace-504123-t8"
+
+SCOPE_CLASSIFIER_PROMPT = """Você é um assistente estrito que decide se a pergunta do usuário exige uma consulta a um banco de dados SQL estruturado com dados reais do Brasil (IBGE, etc) ou se é apenas uma conversa genérica/ajuda sobre outro assunto.
+Pergunta: {question}
+Responda APENAS "dados" se a pergunta exigir consulta ao banco de dados ou "conversa" caso contrário.
+"""
 
 ROUTER_PROMPT = """Você é um assistente de roteamento.
 Classifique a pergunta do usuário em APENAS UM dos seguintes temas: economia, educacao, saude, trabalho, seguranca, geografia ou geral.
@@ -97,14 +103,15 @@ Você gerou a seguinte consulta SQL:
 ```sql
 {sql}
 ```
-E o banco de dados retornou os seguintes dados (limitado às primeiras 20 linhas para contexto):
+O banco de dados retornou {linhas} linhas, listadas abaixo (limitado às primeiras 20 para contexto):
 {data}
 
 **Sua missão:**
 1. Responda à pergunta do usuário de forma direta, clara e com um tom amigável. Fuja de respostas robóticas ou engessadas.
 2. Destaque os principais insights dos dados (ex: quem lidera o ranking, valores discrepantes, tendências).
-3. **Seja propositivo:** Sugira o que o usuário pode fazer com esses dados agora (ex: "Com esses dados, você pode criar um mapa de calor no QGIS", ou "Você pode exportar esse CSV e criar um dashboard no Power BI comparando X com Y").
-4. Formate tudo em Markdown amigável (use negritos, listas, emojis para dar vida ao texto).
+3. **Seja propositivo:** Sugira o que o usuário pode fazer com esses dados agora.
+4. **Regra de Amostra:** Se o total de linhas retornadas ({linhas}) for menor que 30, adicione uma breve ressalva de que a amostra é pequena e os resultados devem ser interpretados com cautela.
+5. Formate tudo em Markdown amigável (use negritos, listas, emojis para dar vida ao texto).
 NÃO gere a tabela de dados no texto, pois o sistema já vai exibir a tabela real interativa logo abaixo da sua análise.
 """
 
@@ -166,6 +173,34 @@ def get_llm():
         api_key=api_key,
         temperature=0,
     )
+
+
+def _invocar_com_retry(chain, inputs: dict, max_tentativas: int = 4):
+    """
+    Invoca uma chain do LangChain com retry automático para o erro 429
+    (rate limit de tokens/minuto da Groq). Extrai o tempo de espera sugerido
+    pela própria API quando disponível ("try again in Xms/Xs"); caso não
+    encontre, usa backoff exponencial. Outros tipos de erro sobem na hora.
+    """
+    espera_base = 1.0
+    ultimo_erro = None
+    for tentativa in range(max_tentativas):
+        try:
+            return chain.invoke(inputs)
+        except Exception as e:
+            ultimo_erro = e
+            mensagem = str(e)
+            eh_rate_limit = "rate_limit" in mensagem.lower() or "429" in mensagem
+            if not eh_rate_limit or tentativa == max_tentativas - 1:
+                raise
+
+            espera = espera_base * (2 ** tentativa)
+            match = re.search(r"try again in ([\d.]+)\s*(ms|s)", mensagem, re.IGNORECASE)
+            if match:
+                valor, unidade = float(match.group(1)), match.group(2).lower()
+                espera = (valor / 1000 if unidade == "ms" else valor) + 0.3  # margem de segurança
+            time.sleep(espera)
+    raise ultimo_erro
 
 
 def get_engine():
@@ -344,19 +379,25 @@ def _obter_colunas_tabela(tabela_completa: str) -> list:
         return []
 
 
-def _enriquecer_contexto_com_schema_real(tabelas_contexto_texto: str) -> str:
+def _enriquecer_contexto_com_schema_real(tabelas_contexto_texto: str, max_colunas_por_tabela: int = 35) -> str:
     """
     Acrescenta ao texto de contexto das tabelas a lista REAL de colunas de cada
     uma (via INFORMATION_SCHEMA), reduzindo a chance do LLM inventar nomes de
     coluna que não existem. Mantém o texto original intacto e só adiciona uma
-    seção nova ao final.
+    seção nova ao final. Trunca listas muito longas para economizar tokens
+    (e, consequentemente, evitar bater no rate limit de tokens/minuto da Groq).
     """
     tabelas = _extrair_tabelas_do_texto(tabelas_contexto_texto)
     linhas_schema = []
     for tabela in tabelas:
         colunas = _obter_colunas_tabela(tabela)
-        if colunas:
-            linhas_schema.append(f"- `{tabela}`: {', '.join(colunas)}")
+        if not colunas:
+            continue
+        if len(colunas) > max_colunas_por_tabela:
+            colunas_texto = ", ".join(colunas[:max_colunas_por_tabela]) + f", ... (+{len(colunas) - max_colunas_por_tabela} colunas)"
+        else:
+            colunas_texto = ", ".join(colunas)
+        linhas_schema.append(f"- `{tabela}`: {colunas_texto}")
     if not linhas_schema:
         return tabelas_contexto_texto
     return (
@@ -710,9 +751,39 @@ def executar_analise_ml(df: pd.DataFrame, ml_config: dict):
         return {"stats": f"⚠️ Não foi possível concluir a análise estatística: {e}", "figura": None}
 
 
+def buscar_tabelas_relevantes(pergunta_usuario: str, top_n: int = 3) -> list:
+    """Busca tabelas no json de metadados baseado nas palavras da pergunta."""
+    caminho_json = os.path.join(os.path.dirname(__file__), "tabelas_metadados.json")
+    if not os.path.exists(caminho_json):
+        return []
+        
+    try:
+        with open(caminho_json, "r", encoding="utf-8") as f:
+            todas_as_tabelas = json.load(f)
+    except Exception:
+        return []
+
+    palavras_chave = pergunta_usuario.lower().split()
+    tabelas_encontradas = []
+    
+    for tab in todas_as_tabelas:
+        desc = tab.get('description', '')
+        if not desc: continue
+        texto_busca = f"{tab.get('dataset_id', '')} {tab.get('table_id', '')} {desc}".lower()
+        
+        score = sum(1 for palavra in palavras_chave if len(palavra) > 3 and palavra in texto_busca)
+        if score > 0:
+            tabelas_encontradas.append((score, tab))
+            
+    tabelas_encontradas.sort(key=lambda x: x[0], reverse=True)
+    return [tab[1] for tab in tabelas_encontradas[:top_n]]
+
+
 def ask(question: str) -> dict:
     """
     Nova arquitetura Chain:
+    0.1 Classificação de Escopo
+    0.2 Roteamento de Metadados
     1. Gera SQL
     2. Executa via Pandas
     3. Gera Análise Textual
@@ -722,19 +793,40 @@ def ask(question: str) -> dict:
         llm = get_llm()
         engine = get_engine()
 
-        # 0. Roteamento de Tema
-        prompt_router = ChatPromptTemplate.from_template(ROUTER_PROMPT)
-        chain_router = prompt_router | llm | StrOutputParser()
-        tema = chain_router.invoke({"question": question}).strip().lower()
+        # 0.1 Classificação de Escopo (Guardião)
+        prompt_scope = ChatPromptTemplate.from_template(SCOPE_CLASSIFIER_PROMPT)
+        chain_scope = prompt_scope | llm | StrOutputParser()
+        escopo = chain_scope.invoke({"question": question}).strip().lower()
+        
+        if "conversa" in escopo:
+            prompt_conversa = ChatPromptTemplate.from_template("O usuário disse: {question}\nResponda de forma amigável e direta, e informe que você só faz consultas a dados estruturados.")
+            chain_conversa = prompt_conversa | llm | StrOutputParser()
+            resposta_conversa = chain_conversa.invoke({"question": question})
+            return {
+                "analysis": resposta_conversa,
+                "sql": "-- Nenhuma query gerada. Pergunta classificada como conversa/meta.",
+                "dataframe": pd.DataFrame(),
+                "ml_config": ML_CONFIG_DEFAULTS,
+                "estatisticas": None,
+                "figura": None
+            }
 
-        # Validar o tema retornado
-        if tema not in TABLE_SCHEMAS_MAP:
-            tema = "geral"
+        # 0.2 Roteamento de Tema via Metadados (RAG Local)
+        tabelas_rag = buscar_tabelas_relevantes(question)
+        if tabelas_rag:
+            contexto_prompt = ""
+            for t in tabelas_rag:
+                contexto_prompt += f"- Tabela: `basedosdados.{t.get('dataset_id', '')}.{t.get('table_id', '')}`\n  Descrição: {t.get('description', '')}\n\n"
+            tabelas_contexto_base = BASE_TABLE + "\n" + contexto_prompt
+        else:
+            prompt_router = ChatPromptTemplate.from_template(ROUTER_PROMPT)
+            chain_router = prompt_router | llm | StrOutputParser()
+            tema = chain_router.invoke({"question": question}).strip().lower()
+            if tema not in TABLE_SCHEMAS_MAP:
+                tema = "geral"
+            tabelas_contexto_base = BASE_TABLE + "\n" + TABLE_SCHEMAS_MAP[tema]
 
-        tabelas_contexto_base = BASE_TABLE + "\n" + TABLE_SCHEMAS_MAP[tema]
         tabelas_permitidas = _extrair_tabelas_do_texto(tabelas_contexto_base)
-        # Enriquece o contexto com o schema real de colunas (INFORMATION_SCHEMA),
-        # para reduzir alucinação de nomes de tabela/coluna que não existem.
         tabelas_contexto = _enriquecer_contexto_com_schema_real(tabelas_contexto_base)
 
         # 1. Geração SQL + Execução, com loop de correção único.
@@ -755,7 +847,7 @@ def ask(question: str) -> dict:
 
             prompt_sql = ChatPromptTemplate.from_template(SQL_PROMPT)
             chain_sql = prompt_sql | llm | StrOutputParser()
-            resposta_llm = chain_sql.invoke({
+            resposta_llm = _invocar_com_retry(chain_sql, {
                 "question": question,
                 "tabelas_contexto": tabelas_contexto,
                 "contexto_erro": contexto_erro
@@ -812,14 +904,15 @@ def ask(question: str) -> dict:
 
         # 3. Análise
         data_sample = _dataframe_para_texto(df.head(20))
+        linhas_totais = len(df)
         prompt_analysis = ChatPromptTemplate.from_template(ANALYSIS_PROMPT)
         chain_analysis = prompt_analysis | llm | StrOutputParser()
-        analysis = chain_analysis.invoke({"question": question, "sql": sql_query, "data": data_sample})
+        analysis = _invocar_com_retry(chain_analysis, {"question": question, "sql": sql_query, "data": data_sample, "linhas": linhas_totais})
 
         # 4. Machine Learning & Gráfico
         prompt_ml = ChatPromptTemplate.from_template(ML_PROMPT)
         chain_ml = prompt_ml | llm | StrOutputParser()
-        ml_json_str = chain_ml.invoke({"question": question, "data": data_sample})
+        ml_json_str = _invocar_com_retry(chain_ml, {"question": question, "data": data_sample})
 
         ml_config = dict(ML_CONFIG_DEFAULTS)
         try:
@@ -857,7 +950,7 @@ def is_followup_analysis(prompt: str) -> bool:
             "Responda APENAS 'sim' ou 'nao'."
         )
         chain = prompt_router | llm | StrOutputParser()
-        resp = chain.invoke({"question": prompt}).strip().lower()
+        resp = _invocar_com_retry(chain, {"question": prompt}).strip().lower()
         return "sim" in resp
     except:
         return False
@@ -868,14 +961,15 @@ def analyze_cached(question: str, df: pd.DataFrame, sql_query: str) -> dict:
     try:
         llm = get_llm()
         data_sample = _dataframe_para_texto(df.head(20))
+        linhas_totais = len(df)
         
         prompt_analysis = ChatPromptTemplate.from_template(ANALYSIS_PROMPT)
         chain_analysis = prompt_analysis | llm | StrOutputParser()
-        analysis = chain_analysis.invoke({"question": question, "sql": sql_query, "data": data_sample})
+        analysis = _invocar_com_retry(chain_analysis, {"question": question, "sql": sql_query, "data": data_sample, "linhas": linhas_totais})
 
         prompt_ml = ChatPromptTemplate.from_template(ML_PROMPT)
         chain_ml = prompt_ml | llm | StrOutputParser()
-        ml_json_str = chain_ml.invoke({"question": question, "data": data_sample})
+        ml_json_str = _invocar_com_retry(chain_ml, {"question": question, "data": data_sample})
 
         ml_config = dict(ML_CONFIG_DEFAULTS)
         try:

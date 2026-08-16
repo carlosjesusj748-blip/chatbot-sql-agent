@@ -1,0 +1,67 @@
+[
+    {
+        "dataset_id": "br_ibge_pib",
+        "table_id": "municipio",
+        "description": "Produto Interno Bruto (PIB) a preços correntes, impostos, líquidos de subsídios, sobre produtos a preços correntes e valor adicionado bruto a preços correntes total e por atividade econômica, e respectivas participações - Referência 2010"
+    },
+    {
+        "dataset_id": "br_ibge_ipca",
+        "table_id": "mes_brasil",
+        "description": "Índice Nacional de Preços ao Consumidor Amplo (IPCA) por mês e Brasil. Inflação."
+    },
+    {
+        "dataset_id": "br_inep_censo_escolar",
+        "table_id": "escola",
+        "description": "Microdados do Censo Escolar da Educação Básica por escola, com informações sobre infraestrutura, turmas, matrículas e docentes."
+    },
+    {
+        "dataset_id": "br_ms_sim",
+        "table_id": "microdados",
+        "description": "Microdados de mortalidade do Sistema de Informações sobre Mortalidade (SIM). Causa obito, homicidios, suicidios."
+    },
+    {
+        "dataset_id": "br_me_caged",
+        "table_id": "microdados_movimentacao",
+        "description": "Microdados das Movimentações do Novo Cadastro Geral de Empregados e Desempregados (Novo CAGED). Empregos, demissões, admissões."
+    },
+    {
+        "dataset_id": "br_me_rais",
+        "table_id": "microdados_vinculos",
+        "description": "Microdados dos Vínculos da Relação Anual de Informações Sociais (RAIS)."
+    },
+    {
+        "dataset_id": "br_fbsp_absp",
+        "table_id": "municipio",
+        "description": "Estatísticas de segurança pública em nível municipal, como homicídio doloso e latrocínio, do Anuário Brasileiro de Segurança Pública."
+    },
+    {
+        "dataset_id": "br_fbsp_absp",
+        "table_id": "uf",
+        "description": "Estatísticas de segurança pública em nível estadual, como homicídio doloso e latrocínio, do Anuário Brasileiro de Segurança Pública."
+    },
+    {
+        "dataset_id": "br_sp_gov_ssp",
+        "table_id": "ocorrencias_registradas",
+        "description": "Ocorrências criminais registradas pela Secretaria de Segurança Pública de São Paulo (SSP-SP)."
+    },
+    {
+        "dataset_id": "br_bd_diretorios_brasil",
+        "table_id": "municipio",
+        "description": "Diretório de municípios do Brasil, ligando códigos de município (IBGE, TSE, Receita Federal) a nomes e coordenadas geográficas."
+    },
+    {
+        "dataset_id": "br_bd_diretorios_brasil",
+        "table_id": "uf",
+        "description": "Diretório de Unidades da Federação (UFs) do Brasil, com nomes, siglas, regiões e códigos IBGE."
+    },
+    {
+        "dataset_id": "br_ibge_populacao",
+        "table_id": "municipio",
+        "description": "Estimativas de População residente nos municípios brasileiros."
+    },
+    {
+        "dataset_id": "br_tse_eleicoes",
+        "table_id": "resultados_candidato_municipio",
+        "description": "Resultados de votação por candidato em nível municipal para as eleições do Brasil."
+    }
+]

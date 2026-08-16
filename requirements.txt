@@ -13,3 +13,4 @@ seaborn
 google-cloud-bigquery
 openpyxl
 plotly
+basedosdados
