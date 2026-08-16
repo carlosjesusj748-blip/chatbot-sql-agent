@@ -251,7 +251,7 @@ def validar_query_bigquery(query_sql):
 
     try:
         query_job = client.query(query_sql, job_config=job_config)
-        bytes_processados = query_job.total_bytes_processed
+        bytes_processados = query_job.total_bytes_processed or 0
         mb_processados = bytes_processados / (1024 * 1024)
         return True, f"Query válida! Processaria {mb_processados:.2f} MB."
     except BadRequest as e:
